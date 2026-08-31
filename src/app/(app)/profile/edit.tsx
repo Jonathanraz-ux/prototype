@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, ScrollView, Pressable, KeyboardAvoidingView, Platform, Animated, TextInput, Alert } from "react-native";
+import { View, Text, ScrollView, Pressable, KeyboardAvoidingView, Platform, Animated, TextInput } from "react-native";
 import { useRouter } from "expo-router";
 import { ArrowLeft, User, Mail, Phone, Save } from "lucide-react-native";
 import PrimaryButton from "../../../components/PrimaryButton";
@@ -15,6 +15,7 @@ export default function EditProfileScreen() {
   const [email, setEmail] = useState(user?.email ?? "");
   const [phone, setPhone] = useState(user?.phone ?? "");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -24,10 +25,11 @@ export default function EditProfileScreen() {
     if (!firstName || !lastName) return;
     setLoading(true);
     try {
-      await updateProfile({ firstName, lastName, email, phone });
+      await updateProfile({ firstName, lastName, phone });
       router.back();
-    } catch {
-      // silent fail
+    } catch (e) {
+      const err = e as Error;
+      setError(err.message ?? "Impossible de mettre à jour le profil.");
     } finally {
       setLoading(false);
     }
@@ -51,8 +53,14 @@ export default function EditProfileScreen() {
             </Text>
           </View>
 
-          <View className="gap-4">
-            <View className="flex-row gap-3">
+            <View className="gap-4">
+              {error ? (
+                <View className="p-3 rounded-2xl" style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", borderWidth: 1, borderColor: "rgba(239, 68, 68, 0.3)" }}>
+                  <Text className="text-xs text-red-400" style={{ fontFamily: "Inter-Regular" }}>{error}</Text>
+                </View>
+              ) : null}
+
+              <View className="flex-row gap-3">
               <View className="flex-1 gap-2">
                 <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Prénom</Text>
                 <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>

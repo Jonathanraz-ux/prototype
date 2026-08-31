@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import { View, Text, ActivityIndicator, Animated, Pressable } from "react-native";
+import { type LucideIcon } from "lucide-react-native";
 import { COLORS } from "../constants/theme";
 
 interface PrimaryButtonProps {
@@ -7,7 +8,7 @@ interface PrimaryButtonProps {
   onPress: () => void;
   loading?: boolean;
   disabled?: boolean;
-  icon?: React.ComponentType<{ color: string; size: number }>;
+  icon?: LucideIcon;
   style?: object;
   className?: string;
 }

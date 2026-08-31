@@ -7,6 +7,5 @@ export {
   SPACING,
   FONTS,
   BREAKPOINTS,
-  ANIMATION_DURATION,
-  MOCK_DELAY
+  ANIMATION_DURATION
 } from "./theme";

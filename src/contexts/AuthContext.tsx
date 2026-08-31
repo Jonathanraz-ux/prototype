@@ -1,19 +1,32 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+} from "react";
+import { getSupabase } from "../lib/supabase";
 import { AuthService } from "../services/auth";
+import { logger } from "../lib/logger";
 import type { User, RegisterData } from "../types";
 
 export interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isAdmin: boolean;
+  isSiteManager: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
-  updateProfile: (updates: Partial<User>) => Promise<void>;
+  updateProfile: (updates: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+  }) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
-  verifyEmail: (code: string) => Promise<void>;
-  pendingVerification: boolean;
-  setPendingVerification: (v: boolean) => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -21,29 +34,48 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [pendingVerification, setPendingVerification] = useState(false);
-  const [initialized, setInitialized] = useState(false);
+
+  const loadSession = useCallback(async () => {
+    try {
+      const session = await AuthService.getSession();
+      if (!session) {
+        setUser(null);
+        return;
+      }
+      const profile = await AuthService.getCurrentUser();
+      setUser(profile);
+    } catch (e) {
+      logger.warn("authctx", "Échec restauration de session", e);
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const restored = await AuthService.restoreSession();
-        if (restored) {
-          setUser(restored);
-        }
-      } catch {
-        // session restore failed
-      } finally {
+    loadSession();
+  }, [loadSession]);
+
+  // Réagir aux changements d'état d'authentification (connexion/déconnexion
+  // depuis un autre point de l'app).
+  useEffect(() => {
+    const { data: sub } = getSupabase().auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null);
         setIsLoading(false);
-        setInitialized(true);
+      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        if (session?.user) {
+          AuthService.getCurrentUser().then(setUser);
+        }
       }
-    })();
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
-      const u = await AuthService.login(email, password);
+      const u = await AuthService.signIn(email, password);
       setUser(u);
     } finally {
       setIsLoading(false);
@@ -53,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(async (data: RegisterData) => {
     setIsLoading(true);
     try {
-      const u = await AuthService.register(data);
+      const u = await AuthService.signUp(data);
       setUser(u);
     } finally {
       setIsLoading(false);
@@ -61,43 +93,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await AuthService.logout();
+    await AuthService.signOut();
     setUser(null);
   }, []);
 
-  const updateProfile = useCallback(async (updates: Partial<User>) => {
-    const updated = await AuthService.updateProfile(updates);
-    setUser(updated);
-  }, []);
+  const updateProfile = useCallback(
+    async (updates: { firstName?: string; lastName?: string; phone?: string }) => {
+      const updated = await AuthService.updateProfile(updates);
+      setUser(updated);
+    },
+    []
+  );
 
   const requestPasswordReset = useCallback(async (email: string) => {
     await AuthService.requestPasswordReset(email);
   }, []);
 
-  const verifyEmail = useCallback(async (code: string) => {
-    await AuthService.verifyEmail(code);
-    setPendingVerification(false);
+  const refreshUser = useCallback(async () => {
+    const profile = await AuthService.getCurrentUser();
+    setUser(profile);
   }, []);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoading: isLoading || !initialized,
-        isAuthenticated: !!user,
-        login,
-        register,
-        logout,
-        updateProfile,
-        requestPasswordReset,
-        verifyEmail,
-        pendingVerification,
-        setPendingVerification
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      isLoading,
+      isAuthenticated: !!user,
+      isAdmin: user?.role === "organization_admin" || user?.role === "super_admin",
+      isSiteManager:
+        user?.role === "site_manager" ||
+        user?.role === "organization_admin" ||
+        user?.role === "super_admin",
+      login,
+      register,
+      logout,
+      updateProfile,
+      requestPasswordReset,
+      refreshUser,
+    }),
+    [user, isLoading, login, register, logout, updateProfile, requestPasswordReset, refreshUser]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

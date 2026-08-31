@@ -17,7 +17,7 @@ import { useAuth } from "../../../contexts/AuthContext";
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register, setPendingVerification } = useAuth();
+  const { register } = useAuth();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
   const [firstName, setFirstName] = useState("");
@@ -53,8 +53,7 @@ export default function RegisterScreen() {
     setLoading(true);
     try {
       await register({ firstName, lastName, email, phone, password });
-      setPendingVerification(true);
-      router.replace("/(public)/verify-email");
+      router.replace("/(app)/(tabs)/dashboard");
     } catch (e: any) {
       setError(e.message || "Erreur lors de l'inscription");
     } finally {

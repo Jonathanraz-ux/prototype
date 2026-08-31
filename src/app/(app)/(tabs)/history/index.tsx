@@ -1,15 +1,15 @@
-import React, { useRef, useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, Animated } from "react-native";
+import React, { useRef, useEffect, useState, useCallback } from "react";
+import { View, Text, ScrollView, Pressable, Animated, RefreshControl } from "react-native";
 import RAnimated, { FadeInDown } from "react-native-reanimated";
-import { Wifi, MapPin, Clock, HardDrive, Search, AlertTriangle, Power, EyeOff, XCircle } from "lucide-react-native";
+import { Wifi, Clock, HardDrive, EyeOff, XCircle, AlertTriangle, Power, type LucideIcon } from "lucide-react-native";
 import { COLORS, SPACING, ANIMATION_DURATION } from "../../../../constants/theme";
-import { QuotaService } from "../../../../services/quota";
+import { fetchHistory } from "../../../../repositories/sessionRepository";
 import { REASON_LABELS } from "../../../../services/connectionMachine";
 import { formatDate, formatDuration, formatBytes } from "../../../../hooks";
 import GlassCard from "../../../../components/GlassCard";
 import type { ConnectionHistoryItem, DisconnectReason } from "../../../../types";
 
-const REASON_ICONS: Record<DisconnectReason, React.ComponentType<{ color: string; size: number }>> = {
+const REASON_ICONS: Record<DisconnectReason, LucideIcon> = {
   ad_closed: EyeOff,
   ad_hidden: EyeOff,
   quota_exhausted: AlertTriangle,
@@ -32,14 +32,25 @@ const REASON_COLORS: Record<DisconnectReason, string> = {
 export default function HistoryScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<"all" | "completed" | "interrupted" | "expired">("all");
   const [history, setHistory] = useState<ConnectionHistoryItem[]>([]);
 
+  const load = useCallback(async () => {
+    const items = await fetchHistory();
+    setHistory(items);
+  }, []);
+
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: ANIMATION_DURATION.slow, useNativeDriver: true }).start();
-    setHistory(QuotaService.getHistory());
-    setTimeout(() => setLoading(false), 600);
-  }, []);
+    load().finally(() => setLoading(false));
+  }, [fadeAnim, load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
   const filtered = filter === "all" ? history : history.filter((h) => h.status === filter);
 
@@ -74,23 +85,16 @@ export default function HistoryScreen() {
       className="flex-1 bg-[#09090B]"
       contentContainerStyle={{ paddingHorizontal: SPACING.screen, paddingTop: 56, paddingBottom: 120 }}
       showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
     >
       <Animated.View style={{ opacity: fadeAnim }} className="gap-6">
-        <View className="flex-row justify-between items-center">
-          <View>
-            <Text className="text-xs text-zinc-500 uppercase tracking-widest mb-1" style={{ fontFamily: "Inter-Regular" }}>
-              Historique
-            </Text>
-            <Text className="text-2xl font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>
-              Connexions
-            </Text>
-          </View>
-          <View className="flex-row items-center gap-2 px-3 py-2 rounded-xl border border-white/10" style={{ backgroundColor: COLORS.card }}>
-            <Search color={COLORS.textMuted} size={16} />
-            <Text className="text-zinc-500 text-xs" style={{ fontFamily: "Inter-Regular" }}>
-              Rechercher...
-            </Text>
-          </View>
+        <View>
+          <Text className="text-xs text-zinc-500 uppercase tracking-widest mb-1" style={{ fontFamily: "Inter-Regular" }}>
+            Historique
+          </Text>
+          <Text className="text-2xl font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>
+            Connexions
+          </Text>
         </View>
 
         <View className="flex-row gap-2 bg-zinc-900/80 p-1.5 rounded-2xl border border-white/5">
@@ -124,14 +128,11 @@ export default function HistoryScreen() {
                     </View>
                     <View className="flex-1">
                       <Text className="text-sm text-white font-semibold mb-0.5" style={{ fontFamily: "Inter-Bold" }}>
-                        {item.ssid}
+                        Session Wi-Fi
                       </Text>
-                      <View className="flex-row items-center gap-2">
-                        <MapPin color={COLORS.textMuted} size={12} />
-                        <Text className="text-xs text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-                          {item.location}
-                        </Text>
-                      </View>
+                      <Text className="text-xs text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
+                        {item.disconnectedAt ? formatDate(item.disconnectedAt) : formatDate(item.connectedAt)}
+                      </Text>
                     </View>
                     <View className="items-end">
                       <View className="px-2.5 py-1 rounded-full mb-1" style={{ backgroundColor: `${statusColors[item.status]}20` }}>
@@ -155,7 +156,7 @@ export default function HistoryScreen() {
                     <View className="flex-row items-center gap-1.5">
                       <HardDrive color={COLORS.textMuted} size={13} />
                       <Text className="text-xs text-zinc-400" style={{ fontFamily: "Inter-Regular" }}>
-                        {formatBytes(item.dataUsedMB)}
+                        {item.dataUsedMB ? formatBytes(item.dataUsedMB) : "--"}
                       </Text>
                     </View>
                   </View>

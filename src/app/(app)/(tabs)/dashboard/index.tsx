@@ -1,53 +1,35 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import { View, Text, ScrollView, Animated, Pressable } from "react-native";
-import { useRouter } from "expo-router";
-import RAnimated, { FadeInDown } from "react-native-reanimated";
-import { COLORS, SPACING, ANIMATION_DURATION } from "../../../../constants/theme";
+import { View, Text, Animated, Pressable, ActivityIndicator, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
+import { COLORS, GRADIENTS } from "../../../../constants/theme";
 import { useAuth } from "../../../../contexts/AuthContext";
 import { useConnection } from "../../../../contexts/ConnectionContext";
-import { formatDuration, formatBytes } from "../../../../hooks";
-import { getLastRefreshDashboard, setLastRefreshDashboard } from "../../../../services/storage";
-import { STATE_LABELS, REASON_LABELS } from "../../../../services/connectionMachine";
-import { Activity, Clock, Wifi, WifiOff, RefreshCw, Play, Power, AlertTriangle, EyeOff, Database, Zap } from "lucide-react-native";
-import ProgressCircle from "../../../../components/ProgressCircle";
-import StatusCard from "../../../../components/StatusCard";
-import GlassCard from "../../../../components/GlassCard";
-import AdBanner from "../../../../components/AdBanner";
+import { Play, Power, AlertTriangle } from "lucide-react-native";
+import HeroAdCard from "../../../../components/HeroAdCard";
+import ConnectionStatusCard from "../../../../components/ConnectionStatusCard";
+import RefreshButton from "../../../../components/RefreshButton";
 
 export default function DashboardScreen() {
-  const router = useRouter();
   const { user } = useAuth();
-  const { state, internetStatus, usage, stateLabel, disconnectReason, reasonLabel, connect, disconnect, refillQuota } = useConnection();
+  const { state, internetStatus, usage, connect, disconnect, refillQuota, currentAd } = useConnection();
+  const insets = useSafeAreaInsets();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: ANIMATION_DURATION.slow, useNativeDriver: true }).start();
-    setTimeout(() => setLoading(false), 600);
-  }, []);
+    Animated.timing(fadeAnim, { toValue: 1, duration: 450, useNativeDriver: true }).start();
+    const t = setTimeout(() => setLoading(false), 500);
+    return () => clearTimeout(t);
+  }, [fadeAnim]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await getLastRefreshDashboard();
-        if (raw) setLastRefresh(raw);
-      } catch {}
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (state === "connecting") setConnecting(true);
-    else setConnecting(false);
-  }, [state]);
+  const connecting = state === "connecting";
+  const isActive = internetStatus === "active";
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    setLastRefresh(new Date().toISOString());
-    await setLastRefreshDashboard(new Date().toISOString());
+    await new Promise((resolve) => setTimeout(resolve, 900));
     setIsRefreshing(false);
   }, []);
 
@@ -59,270 +41,211 @@ export default function DashboardScreen() {
     await disconnect();
   };
 
-  const quotaPercent = (usage.remainingQuotaMB / usage.totalQuotaMB) * 100;
-  const timePercent = (usage.remainingTimeMinutes / usage.totalTimeMinutes) * 100;
+  const percent = usage.totalQuotaMB > 0 ? (usage.remainingQuotaMB / usage.totalQuotaMB) * 100 : 0;
 
-  const isConnected = state === "connected" || state === "ad_found";
-  const isDisconnected = state === "deconnected" || state === "quota_exhausted" || state === "ad_missing" || state === "suspended" || state === "network_error";
+  const renderAction = () => {
+    // Publicité en cours de lecture obligatoire : aucun bouton.
+    if (state === "connecting" || state === "ad_found" || currentAd) return null;
 
-  const getStatusColor = () => {
-    if (isConnected) return COLORS.success;
-    if (state === "connecting") return COLORS.warning;
-    if (state === "quota_exhausted") return COLORS.danger;
-    if (state === "ad_missing") return COLORS.warning;
-    if (state === "suspended") return COLORS.warning;
-    if (state === "network_error") return COLORS.danger;
-    return COLORS.textMuted;
+    // Internet actif : seule action = se déconnecter
+    if (state === "connected") {
+      return (
+        <Pressable
+          onPress={handleDisconnect}
+          style={({ pressed }) => [styles.disconnectButton, { transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+        >
+          <Power color={COLORS.danger} size={18} />
+          <Text style={styles.disconnectText}>Se déconnecter</Text>
+        </Pressable>
+      );
+    }
+
+    if (state === "quota_exhausted") {
+      return (
+        <View style={styles.alertWrap}>
+          <View style={styles.alertRow}>
+            <AlertTriangle color={COLORS.warning} size={16} />
+            <Text style={styles.alertText} numberOfLines={1}>
+              Quota épuisé — renouvelez pour rester connecté
+            </Text>
+          </View>
+          <Pressable
+            onPress={refillQuota}
+            style={({ pressed }) => [styles.alertButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
+          >
+            <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+            <Text style={styles.alertButtonText}>Regarder une publicité</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    return (
+      <Pressable
+        onPress={handleConnect}
+        disabled={connecting}
+        style={({ pressed }) => [
+          styles.connectWrap,
+          {
+            opacity: connecting ? 0.85 : 1,
+            transform: [{ scale: pressed && !connecting ? 0.98 : 1 }]
+          }
+        ]}
+      >
+        <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+        {connecting ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <>
+            <Play color="#FFFFFF" size={20} fill="#FFFFFF" />
+            <Text style={styles.connectText}>Regarder la pub et se connecter</Text>
+          </>
+        )}
+      </Pressable>
+    );
   };
-
-  const getStatusIcon = () => {
-    if (isConnected) return Wifi;
-    if (state === "connecting") return RefreshCw;
-    return WifiOff;
-  };
-
-  const StatusIcon = getStatusIcon();
 
   if (loading) {
     return (
-      <ScrollView className="flex-1 bg-[#09090B] px-6 pt-6" contentContainerStyle={{ paddingBottom: SPACING.xxl }}>
-        <View className="gap-4">
-          {[1, 2, 3].map((i) => (
-            <View key={i} className="h-28 rounded-2xl" style={{ backgroundColor: COLORS.card }} />
-          ))}
+      <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
+        <View style={styles.container}>
+          <View className="gap-2">
+            <View style={styles.skeleton} className="w-24 h-3 rounded" />
+            <View style={styles.skeleton} className="w-44 h-6 rounded" />
+          </View>
+          <View style={[styles.skeleton, { flex: 1, borderRadius: 28 }]} />
+          <View style={styles.skeleton} className="h-36 rounded-3xl" />
         </View>
-      </ScrollView>
+      </View>
     );
   }
 
-  const lastRefreshLabel = lastRefresh
-    ? new Date(lastRefresh).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
-    : "";
-
   return (
-    <ScrollView
-      className="flex-1 bg-[#09090B]"
-      contentContainerStyle={{ paddingBottom: 120 }}
-      showsVerticalScrollIndicator={false}
-    >
-      <Animated.View style={{ opacity: fadeAnim }} className="gap-6 px-6 pt-14">
-        <View className="flex-row justify-between items-start">
-          <View>
-            <Text className="text-xs text-zinc-500 uppercase tracking-widest mb-1" style={{ fontFamily: "Inter-Regular" }}>
-              Tableau de bord
+    <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
+      <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title} numberOfLines={1}>
+              Bonjour <Text style={{ color: COLORS.accentSoft }}>{user?.firstName ?? ""}</Text>
             </Text>
-            <Text className="text-2xl font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>
-              Bonjour, {user?.firstName ?? ""}
-            </Text>
-            {lastRefreshLabel ? (
-              <Text className="text-xs text-zinc-500 mt-1" style={{ fontFamily: "Inter-Regular" }}>
-                Dernière mise à jour : {lastRefreshLabel}
-              </Text>
-            ) : null}
+            <Text style={styles.subtitle}>Connexion financée par la publicité</Text>
           </View>
-          <Pressable
-            onPress={handleRefresh}
-            disabled={isRefreshing}
-            className="w-10 h-10 rounded-full items-center justify-center border border-white/10"
-            style={{ backgroundColor: COLORS.card, opacity: isRefreshing ? 0.5 : 1 }}
-          >
-            <RefreshCw color={COLORS.textSecondary} size={18} />
-          </Pressable>
+          <RefreshButton refreshing={isRefreshing} onPress={handleRefresh} />
         </View>
 
-        <GlassCard>
-          <View className="flex-row justify-between items-center mb-4">
-            <View className="flex-1">
-              <Text className="text-sm text-zinc-400 mb-1" style={{ fontFamily: "Inter-Regular" }}>
-                Statut de connexion
-              </Text>
-              <View className="flex-row items-center gap-2 mb-1">
-                <View className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getStatusColor() }} />
-                <Text className="text-lg font-bold" style={{ color: getStatusColor(), fontFamily: "Inter-Bold" }}>
-                  {stateLabel}
-                </Text>
-              </View>
-              <View className="flex-row items-center gap-1">
-                <StatusIcon color={getStatusColor()} size={12} />
-                <Text className="text-xs" style={{ color: getStatusColor(), fontFamily: "Inter-Regular" }}>
-                  {internetStatus === "active" ? "Internet actif" : internetStatus === "cut" ? "Internet coupé" : "Internet suspendu"}
-                </Text>
-              </View>
-              {disconnectReason && !isConnected ? (
-                <View className="flex-row items-center gap-1 mt-1">
-                  <AlertTriangle color={COLORS.warning} size={12} />
-                  <Text className="text-xs" style={{ color: COLORS.warning, fontFamily: "Inter-Regular" }}>
-                    {reasonLabel}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            <ProgressCircle
-              progress={quotaPercent}
-              size={64}
-              strokeWidth={6}
-              color={quotaPercent > 75 ? COLORS.warning : COLORS.primary}
-            />
-          </View>
-          <View className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-            <View className="h-full rounded-full" style={{ width: `${quotaPercent}%`, backgroundColor: quotaPercent > 75 ? COLORS.warning : COLORS.primary }} />
-          </View>
-          <View className="flex-row justify-between mt-2">
-            <Text className="text-xs text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-              {formatBytes(usage.remainingQuotaMB)} restants
-            </Text>
-            <Text className="text-xs text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-              {formatBytes(usage.totalQuotaMB)} total
-            </Text>
-          </View>
-        </GlassCard>
-
-        {isConnected && (
-          <RAnimated.View entering={FadeInDown.duration(400)}>
-            <AdBanner />
-          </RAnimated.View>
-        )}
-
-        {isConnected && (
-          <View className="flex-row gap-3">
-            <StatusCard
-              title="Temps restant"
-              value={formatDuration(usage.remainingTimeMinutes)}
-              icon={<Clock color={COLORS.accent} size={20} />}
-              subtitle={`sur ${formatDuration(usage.totalTimeMinutes)}`}
-            />
-            <StatusCard
-              title="Vitesse"
-              value={formatBytes(usage.downloadSpeedKbps / 1000 * 0.125) + "/s ↓"}
-              subtitle={formatBytes(usage.uploadSpeedKbps / 1000 * 0.125) + "/s ↑"}
-              icon={<Activity color={COLORS.success} size={20} />}
-            />
-          </View>
-        )}
-
-        {isConnected && (
-          <GlassCard>
-            <View className="flex-row justify-between items-center mb-3">
-              <Text className="text-sm font-semibold text-white" style={{ fontFamily: "Inter-Bold" }}>
-                Consommation
-              </Text>
-              <Text className="text-xs text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-                {formatBytes(usage.todayConsumptionMB)} aujourd'hui
-              </Text>
-            </View>
-            <View className="h-2 rounded-full bg-zinc-800 overflow-hidden">
-              <View className="h-full rounded-full" style={{ width: `${(usage.todayConsumptionMB / usage.totalQuotaMB) * 100}%`, backgroundColor: COLORS.accent }} />
-            </View>
-          </GlassCard>
-        )}
-
-        {state === "quota_exhausted" ? (
-          <RAnimated.View entering={FadeInDown.duration(400)}>
-            <GlassCard>
-              <View className="items-center py-4 gap-3">
-                <View className="w-16 h-16 rounded-full items-center justify-center" style={{ backgroundColor: `${COLORS.warning}20` }}>
-                  <AlertTriangle color={COLORS.warning} size={28} />
-                </View>
-                <Text className="text-lg font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>Quota épuisé</Text>
-                <Text className="text-sm text-zinc-400 text-center" style={{ fontFamily: "Inter-Regular" }}>
-                  Votre quota Internet est épuisé. Vous pouvez renouveler votre forfait pour retrouver l'accès.
-                </Text>
-                <Pressable
-                  onPress={refillQuota}
-                  className="rounded-2xl px-6 py-3 mt-2"
-                  style={{ backgroundColor: COLORS.primary }}
-                >
-                  <Text className="text-sm font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>
-                    Renouveler le quota
-                  </Text>
-                </Pressable>
-              </View>
-            </GlassCard>
-          </RAnimated.View>
-        ) : null}
-
-        {state === "ad_missing" ? (
-          <RAnimated.View entering={FadeInDown.duration(400)}>
-            <GlassCard>
-              <View className="items-center py-4 gap-3">
-                <View className="w-16 h-16 rounded-full items-center justify-center" style={{ backgroundColor: `${COLORS.warning}20` }}>
-                  <EyeOff color={COLORS.warning} size={28} />
-                </View>
-                <Text className="text-lg font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>Publicité masquée</Text>
-                <Text className="text-sm text-zinc-400 text-center" style={{ fontFamily: "Inter-Regular" }}>
-                  La publicité obligatoire a été fermée. La connexion Internet a été interrompue.
-                </Text>
-              </View>
-            </GlassCard>
-          </RAnimated.View>
-        ) : null}
-
-        <View className="gap-3">
-          {isDisconnected && state !== "quota_exhausted" && state !== "ad_missing" ? (
-            <Pressable
-              onPress={handleConnect}
-              disabled={connecting}
-              className="rounded-2xl py-4 items-center justify-center flex-row gap-2"
-              style={{ backgroundColor: COLORS.primary, opacity: connecting ? 0.7 : 1 }}
-            >
-              {connecting ? (
-                <RefreshCw color="#fff" size={20} />
-              ) : (
-                <Play color="#fff" size={20} />
-              )}
-              <Text className="text-base font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>
-                {connecting ? "Connexion en cours..." : "Se connecter"}
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {isConnected ? (
-            <Pressable
-              onPress={handleDisconnect}
-              className="rounded-2xl py-4 items-center justify-center flex-row gap-2"
-              style={{ backgroundColor: "rgba(239, 68, 68, 0.15)", borderWidth: 1, borderColor: "rgba(239, 68, 68, 0.3)" }}
-            >
-              <Power color={COLORS.danger} size={20} />
-              <Text className="text-base font-bold" style={{ color: COLORS.danger, fontFamily: "Inter-Bold" }}>
-                Se déconnecter
-              </Text>
-            </Pressable>
-          ) : null}
+        <View style={{ flex: 1 }}>
+          <HeroAdCard />
         </View>
 
-        <Text className="text-sm font-semibold text-zinc-300" style={{ fontFamily: "Inter-Bold" }}>
-          Actions rapides
-        </Text>
-        <View className="flex-row flex-wrap gap-3">
-          {[
-            { label: "Quota", icon: Database, color: COLORS.accent, subtitle: "Voir détails" },
-            { label: "Historique", icon: Clock, color: COLORS.primary, subtitle: "Connexions" },
-            { label: "Vitesse", icon: Zap, color: COLORS.success, subtitle: "Test" },
-            { label: "Support", icon: Activity, color: COLORS.warning, subtitle: "Assistance" }
-          ].map((action) => (
-            <Pressable
-              key={action.label}
-              className="rounded-2xl border border-white/5 items-center justify-center"
-              style={{
-                width: "47%",
-                backgroundColor: COLORS.card,
-                paddingVertical: 20,
-                paddingHorizontal: 16
-              }}
-            >
-              <View className="w-12 h-12 rounded-2xl items-center justify-center mb-3" style={{ backgroundColor: `${action.color}18` }}>
-                <action.icon color={action.color} size={20} />
-              </View>
-              <Text className="text-white text-sm font-semibold" style={{ fontFamily: "Inter-Bold" }}>
-                {action.label}
-              </Text>
-              <Text className="text-zinc-500 text-xs mt-0.5" style={{ fontFamily: "Inter-Regular" }}>
-                {action.subtitle}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <ConnectionStatusCard
+          connected={isActive}
+          connecting={connecting}
+          percent={percent}
+          timeMinutes={usage.remainingTimeMinutes}
+          quotaMB={usage.remainingQuotaMB}
+        />
+
+        {renderAction()}
       </Animated.View>
-    </ScrollView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.background
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 104,
+    gap: 14
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16
+  },
+  title: {
+    color: "#FFFFFF",
+    fontSize: 27,
+    lineHeight: 34,
+    fontFamily: "Inter-Bold"
+  },
+  subtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    marginTop: 2,
+    fontFamily: "Inter-Regular"
+  },
+  connectWrap: {
+    height: 56,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 10,
+    overflow: "hidden",
+    shadowColor: "#FF7A00",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    elevation: 10
+  },
+  connectText: {
+    color: "#FFFFFF",
+    fontSize: 15.5,
+    fontFamily: "Inter-Bold"
+  },
+  disconnectButton: {
+    height: 56,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 9,
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.3)"
+  },
+  disconnectText: {
+    color: COLORS.danger,
+    fontSize: 15.5,
+    fontFamily: "Inter-Bold"
+  },
+  alertWrap: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.35)",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    padding: 14,
+    gap: 12
+  },
+  alertRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  alertText: {
+    flex: 1,
+    color: COLORS.warning,
+    fontSize: 13,
+    fontFamily: "Inter-Regular"
+  },
+  alertButton: {
+    height: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  alertButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontFamily: "Inter-Bold"
+  },
+  skeleton: {
+    backgroundColor: COLORS.card
+  }
+});

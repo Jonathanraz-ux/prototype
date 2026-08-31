@@ -3,7 +3,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const KEYS = {
   SETTINGS: "@wifizone/settings",
   NOTIFICATIONS_READ: "@wifizone/notifications_read",
-  SELECTED_PLAN: "@wifizone/selected_plan",
   LAST_REFRESH_DASHBOARD: "@wifizone/last_refresh_dashboard"
 } as const;
 
@@ -41,14 +40,6 @@ export async function getReadNotifications(): Promise<string | null> {
 
 export async function setReadNotifications(dataJson: string | null): Promise<void> {
   return safeSet(KEYS.NOTIFICATIONS_READ, dataJson);
-}
-
-export async function getSelectedPlan(): Promise<string | null> {
-  return safeGet(KEYS.SELECTED_PLAN);
-}
-
-export async function setSelectedPlan(plan: string | null): Promise<void> {
-  return safeSet(KEYS.SELECTED_PLAN, plan);
 }
 
 export async function getLastRefreshDashboard(): Promise<string | null> {

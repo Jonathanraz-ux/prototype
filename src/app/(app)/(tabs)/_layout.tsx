@@ -1,82 +1,77 @@
 import { Tabs } from "expo-router";
-import Animated, {
-  useAnimatedStyle,
-  withSpring,
-  withTiming
-} from "react-native-reanimated";
-import { View, Platform, Pressable } from "react-native";
+import { View, Platform, Text, StyleSheet, Pressable } from "react-native";
+import Animated, { useAnimatedStyle, withTiming, withSpring } from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
 import { COLORS } from "../../../constants/theme";
-import { Home, Clock, Bell, User, Settings } from "lucide-react-native";
+import { Home, Megaphone, User, type LucideIcon } from "lucide-react-native";
+import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 
-const HOME_ICON = Home;
-const HOME_ACTIVE = Home;
-const CLOCK_ICON = Clock;
-const CLOCK_ACTIVE = Clock;
-const BELL_ICON = Bell;
-const BELL_ACTIVE = Bell;
-const USER_ICON = User;
-const USER_ACTIVE = User;
-const SETTINGS_ICON = Settings;
-const SETTINGS_ACTIVE = Settings;
+const SPRING = { damping: 16, stiffness: 180, mass: 0.6 };
 
-const SPRING_CONFIG = { damping: 15, stiffness: 150, mass: 0.8 };
+type TabDef = {
+  routeName: string;
+  label: string;
+  Icon: LucideIcon;
+};
 
-const TABS = [
-  { routeName: "dashboard", label: "Accueil", Icon: HOME_ICON, ActiveIcon: HOME_ACTIVE },
-  { routeName: "history", label: "Historique", Icon: CLOCK_ICON, ActiveIcon: CLOCK_ACTIVE },
-  { routeName: "notifications", label: "Notifications", Icon: BELL_ICON, ActiveIcon: BELL_ACTIVE },
-  { routeName: "profile", label: "Profil", Icon: USER_ICON, ActiveIcon: USER_ACTIVE },
-  { routeName: "settings", label: "Réglages", Icon: SETTINGS_ICON, ActiveIcon: SETTINGS_ACTIVE }
-] as const;
+const TABS: TabDef[] = [
+  { routeName: "dashboard", label: "Accueil", Icon: Home },
+  { routeName: "ads", label: "Publicités", Icon: Megaphone },
+  { routeName: "profile", label: "Profil", Icon: User }
+];
 
-function AnimatedTabIcon({
-  Icon,
-  ActiveIcon,
-  focused
-}: {
-  Icon: React.ComponentType<{ color: string; size: number }>;
-  ActiveIcon: React.ComponentType<{ color: string; size: number }>;
-  focused: boolean;
-}) {
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: withSpring(focused ? 1.15 : 1, SPRING_CONFIG) },
-      { translateY: withSpring(focused ? -4 : 0, SPRING_CONFIG) }
-    ],
-    opacity: withTiming(focused ? 1 : 0.7, { duration: 200 })
+function HapticTabButton(props: BottomTabBarButtonProps) {
+  return (
+    <Pressable
+      onPress={(e) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        props.onPress?.(e);
+      }}
+      style={{ flex: 1 }}
+    >
+      {props.children}
+    </Pressable>
+  );
+}
+
+function TabIcon({ Icon, focused }: { Icon: LucideIcon; focused: boolean }) {
+  const pillStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(focused ? 1 : 0, { duration: 180 }),
+    transform: [{ scale: withSpring(focused ? 1 : 0.5, SPRING) }]
   }));
 
-  const IconComponent = focused ? ActiveIcon : Icon;
-
   return (
-    <Animated.View style={animatedStyle}>
-      <IconComponent color={focused ? COLORS.accent : COLORS.textSecondary} size={24} />
-    </Animated.View>
+    <View style={styles.iconSlot}>
+      <Animated.View style={[styles.pill, pillStyle]} />
+      <Icon
+        color={focused ? "#FFFFFF" : COLORS.textSecondary}
+        size={22}
+        strokeWidth={focused ? 2.4 : 2}
+      />
+    </View>
+  );
+}
+
+function Label({ text, focused }: { text: string; focused: boolean }) {
+  return (
+    <Text
+      style={[styles.label, { color: focused ? COLORS.accentSoft : COLORS.textMuted }]}
+      numberOfLines={1}
+    >
+      {text}
+    </Text>
   );
 }
 
 export default function TabLayout() {
   return (
     <Tabs
-      initialLayout={{ width: 100, height: 100 }}
       backBehavior="history"
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: "rgba(9, 9, 11, 0.92)",
-          borderTopColor: "rgba(255, 255, 255, 0.06)",
-          borderTopWidth: 1,
-          height: 88,
-          paddingBottom: Platform.OS === "ios" ? 32 : 18,
-          paddingTop: 10,
-          elevation: 0
-        },
-        tabBarHideOnKeyboard: true,
-        tabBarItemStyle: { flex: 1 }
+        tabBarStyle: styles.tabBar,
+        tabBarItemStyle: styles.tabItem,
+        tabBarHideOnKeyboard: true
       }}
     >
       {TABS.map((tab) => (
@@ -85,13 +80,8 @@ export default function TabLayout() {
           name={tab.routeName}
           options={{
             tabBarLabel: ({ focused }) => <Label text={tab.label} focused={focused} />,
-            tabBarIcon: ({ focused }) => (
-              <AnimatedTabIcon
-                Icon={tab.Icon}
-                ActiveIcon={tab.ActiveIcon}
-                focused={focused}
-              />
-            )
+            tabBarIcon: ({ focused }) => <TabIcon Icon={tab.Icon} focused={focused} />,
+            tabBarButton: HapticTabButton
           }}
         />
       ))}
@@ -99,20 +89,51 @@ export default function TabLayout() {
   );
 }
 
-function Label({ text, focused }: { text: string; focused: boolean }) {
-  return (
-    <Animated.Text
-      style={[
-        {
-          fontSize: 11,
-          fontWeight: "700",
-          color: focused ? COLORS.accent : COLORS.textSecondary,
-          letterSpacing: 0.3,
-          marginTop: 3
-        }
-      ]}
-    >
-      {text}
-    </Animated.Text>
-  );
-}
+const styles = StyleSheet.create({
+  tabBar: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    bottom: Platform.OS === "ios" ? 22 : 16,
+    height: Platform.OS === "ios" ? 76 : 70,
+    backgroundColor: "rgba(21, 21, 24, 0.94)",
+    borderTopWidth: 0,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 26,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === "ios" ? 12 : 8,
+    elevation: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.5,
+    shadowRadius: 28
+  },
+  tabItem: {
+    flex: 1,
+    paddingHorizontal: 4
+  },
+  iconSlot: {
+    width: 48,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  pill: {
+    position: "absolute",
+    width: 48,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 138, 0, 0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 138, 0, 0.35)"
+  },
+  label: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    fontFamily: "Inter-Bold",
+    marginTop: 3,
+    textAlign: "center"
+  }
+});

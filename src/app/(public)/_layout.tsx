@@ -26,7 +26,6 @@ export default function PublicLayout() {
       <Stack.Screen name="login/index" />
       <Stack.Screen name="login/forgot-password" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="register/index" />
-      <Stack.Screen name="verify-email" options={{ animation: "fade" }} />
     </Stack>
   );
 }

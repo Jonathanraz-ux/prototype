@@ -1,73 +1,70 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, ScrollView, Pressable } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
-import { Bell, CheckCheck, AlertTriangle, Wrench, Database, Info } from "lucide-react-native";
+import { Bell, CheckCheck, Wrench, Database, Info, Megaphone } from "lucide-react-native";
 import { COLORS, SPACING } from "../../../../constants/theme";
-import { MOCK_NOTIFICATIONS } from "../../../../services/mockData";
+import {
+  fetchNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+} from "../../../../repositories/notificationRepository";
 import { formatDate } from "../../../../hooks";
-import { setReadNotifications, getReadNotifications } from "../../../../services/storage";
+import type { AppNotification } from "../../../../types";
 
-type Notification = (typeof MOCK_NOTIFICATIONS)[number];
-
-const TYPE_CONFIG = {
+const TYPE_CONFIG: Record<AppNotification["type"], { bg: string; border: string; color: string; label: string }> = {
   promotion: { bg: "rgba(245, 158, 11, 0.1)", border: "rgba(245, 158, 11, 0.3)", color: COLORS.warning, label: "Promo" },
   maintenance: { bg: "rgba(239, 68, 68, 0.1)", border: "rgba(239, 68, 68, 0.3)", color: COLORS.danger, label: "Maintenance" },
   quota: { bg: "rgba(56, 189, 248, 0.1)", border: "rgba(56, 189, 248, 0.3)", color: COLORS.accent, label: "Quota" },
   system: { bg: "rgba(37, 99, 235, 0.1)", border: "rgba(37, 99, 235, 0.3)", color: COLORS.primary, label: "Système" }
-} as const;
+};
 
-const TYPE_ICONS = {
-  promotion: AlertTriangle,
+const TYPE_ICONS: Record<AppNotification["type"], typeof Info> = {
+  promotion: Megaphone,
   maintenance: Wrench,
   quota: Database,
   system: Info
-} as const;
+};
 
 export default function NotificationsScreen() {
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
-  const [notifications, setNotifications] = useState<Notification[]>(MOCK_NOTIFICATIONS);
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      try {
-        const raw = await getReadNotifications();
-        if (raw) {
-          const parsed = JSON.parse(raw) as string[];
-          setReadIds(new Set(parsed));
-        }
-      } catch {}
+      const items = await fetchNotifications();
+      setNotifications(items);
+      setLoading(false);
     })();
-  }, []);
-
-  const persistRead = useCallback(async (ids: Set<string>) => {
-    try {
-      await setReadNotifications(JSON.stringify([...ids]));
-    } catch {}
   }, []);
 
   const markAsRead = useCallback(async (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-    setReadIds((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      persistRead(next);
-      return next;
-    });
-  }, [persistRead]);
+    await markNotificationRead(id);
+  }, []);
 
-  const markAllAsRead = useCallback(async () => {
+  const markAll = useCallback(async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    const allIds = new Set(notifications.map((n) => n.id));
-    setReadIds(allIds);
-    await persistRead(allIds);
-  }, [notifications, persistRead]);
+    await markAllNotificationsRead();
+  }, []);
 
   const filtered = filter === "all"
     ? notifications
     : notifications.filter((n) => (filter === "unread" ? !n.read : n.read));
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+
+  if (loading) {
+    return (
+      <ScrollView className="flex-1 bg-[#09090B] px-6 pt-6" contentContainerStyle={{ paddingBottom: SPACING.xxl }}>
+        <View className="gap-4">
+          {[1, 2, 3].map((i) => (
+            <View key={i} className="h-24 rounded-2xl" style={{ backgroundColor: COLORS.card }} />
+          ))}
+        </View>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView
@@ -86,7 +83,7 @@ export default function NotificationsScreen() {
             </Text>
           </View>
           {unreadCount > 0 && (
-            <Pressable onPress={markAllAsRead} className="flex-row items-center gap-2 px-3 py-2 rounded-xl" style={{ backgroundColor: `${COLORS.primary}15` }}>
+            <Pressable onPress={markAll} className="flex-row items-center gap-2 px-3 py-2 rounded-xl" style={{ backgroundColor: `${COLORS.primary}15` }}>
               <CheckCheck color={COLORS.primary} size={16} />
               <Text className="text-xs font-semibold" style={{ color: COLORS.primary, fontFamily: "Inter-Bold" }}>
                 Tout lu
@@ -124,15 +121,14 @@ export default function NotificationsScreen() {
             filtered.map((notification, index) => {
               const config = TYPE_CONFIG[notification.type];
               const Icon = TYPE_ICONS[notification.type];
-              const isRead = notification.read || readIds.has(notification.id);
               return (
                 <Animated.View key={notification.id} entering={FadeInDown.delay(index * 60).duration(350)}>
                   <Pressable
                     onPress={() => markAsRead(notification.id)}
                     className="rounded-2xl overflow-hidden"
-                    style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: isRead ? COLORS.border : config.border, borderLeftWidth: 3, borderLeftColor: config.color }}
+                    style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: notification.read ? COLORS.border : config.border, borderLeftWidth: 3, borderLeftColor: config.color }}
                   >
-                    {!isRead && (
+                    {!notification.read && (
                       <View className="absolute top-4 right-4">
                         <View className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: config.color }} />
                       </View>
@@ -155,21 +151,12 @@ export default function NotificationsScreen() {
                       </View>
 
                       <Text className="text-zinc-400 text-sm leading-5 mb-3" style={{ fontFamily: "Inter-Regular" }}>
-                        {notification.message}
+                        {notification.body}
                       </Text>
 
-                      <View className="flex-row justify-between items-center">
-                        <Text className="text-xs text-zinc-600" style={{ fontFamily: "Inter-Regular" }}>
-                          {formatDate(notification.createdAt)}
-                        </Text>
-                        {notification.action && (
-                          <Pressable className="px-3 py-1.5 rounded-lg" style={{ backgroundColor: config.bg }} onPress={() => markAsRead(notification.id)}>
-                            <Text className="text-xs font-semibold" style={{ color: config.color, fontFamily: "Inter-Bold" }}>
-                              {notification.action.label}
-                            </Text>
-                          </Pressable>
-                        )}
-                      </View>
+                      <Text className="text-xs text-zinc-600" style={{ fontFamily: "Inter-Regular" }}>
+                        {formatDate(notification.createdAt)}
+                      </Text>
                     </View>
                   </Pressable>
                 </Animated.View>

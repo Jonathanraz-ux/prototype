@@ -1,87 +1,219 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getSupabase } from "../lib/supabase";
+import { logger } from "../lib/logger";
 import type { User, RegisterData } from "../types";
 
-const AUTH_KEY = "@wifizone/auth_session";
-const USER_KEY = "@wifizone/user_data";
+const TAG = "auth";
 
-const DEMO_USER: User = {
-  id: "u-001",
-  firstName: "Jean",
-  lastName: "Dupont",
-  email: "jean.dupont@email.com",
-  phone: "+33 6 12 34 56 78",
-  plan: "free",
-  createdAt: "2026-01-15"
-};
+function mapProfileToUser(row: {
+  id: string;
+  organization_id: string | null;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  role: string;
+  status: string;
+  created_at: string;
+}): User {
+  return {
+    id: row.id,
+    organizationId: row.organization_id ?? "",
+    firstName: row.first_name,
+    lastName: row.last_name,
+    fullName: row.full_name,
+    email: row.email ?? "",
+    phone: row.phone ?? "",
+    role: row.role as User["role"],
+    status: row.status as User["status"],
+    createdAt: row.created_at,
+  };
+}
 
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function fetchProfile(userId: string): Promise<User | null> {
+  const { data, error } = await getSupabase()
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    logger.warn(TAG, "Échec de récupération du profil", error.message);
+    return null;
+  }
+  if (!data) return null;
+  return mapProfileToUser(data);
+}
 
 export const AuthService = {
-  async login(email: string, password: string): Promise<User> {
-    await delay(800);
-    if (!email || !password) {
-      throw new Error("Email et mot de passe requis");
-    }
-    const user = { ...DEMO_USER, email };
-    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify({ email, token: "session-token-" + Date.now() }));
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
-    return user;
+  async getSession() {
+    const { data } = await getSupabase().auth.getSession();
+    return data.session;
   },
 
-  async register(data: RegisterData): Promise<User> {
-    await delay(1200);
-    if (!data.email || !data.password || !data.firstName || !data.lastName) {
-      throw new Error("Tous les champs sont requis");
+  async getCurrentUser(): Promise<User | null> {
+    const {
+      data: { user },
+    } = await getSupabase().auth.getUser();
+    if (!user) return null;
+    return fetchProfile(user.id);
+  },
+
+  /**
+   * Inscription réelle via Supabase Auth.
+   * Après inscription, crée/actualise le profil dans la table profiles.
+   */
+  async signUp(data: RegisterData): Promise<User> {
+    const supabase = getSupabase();
+
+    const { data: authData, error } = await supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+      options: {
+        data: {
+          first_name: data.firstName,
+          last_name: data.lastName,
+          full_name: `${data.firstName} ${data.lastName}`.trim(),
+          phone: data.phone,
+        },
+      },
+    });
+
+    if (error) {
+      logger.warn(TAG, "Échec inscription", error.message);
+      throw new Error(translateAuthError(error.message));
     }
-    const user: User = {
-      id: "u-" + Date.now(),
+
+    const userId = authData.user?.id;
+    if (!userId) {
+      throw new Error("Impossible de créer le compte.");
+    }
+
+    // Upsert du profil
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .upsert(
+        {
+          id: userId,
+          first_name: data.firstName,
+          last_name: data.lastName,
+          full_name: `${data.firstName} ${data.lastName}`.trim(),
+          email: data.email,
+          phone: data.phone || null,
+          role: "user",
+          status: "pending",
+        },
+        { onConflict: "id" }
+      );
+
+    if (profileError) {
+      logger.warn(TAG, "Échec création profil", profileError.message);
+    }
+
+    return (await fetchProfile(userId)) ?? {
+      id: userId,
+      organizationId: "",
       firstName: data.firstName,
       lastName: data.lastName,
+      fullName: `${data.firstName} ${data.lastName}`.trim(),
       email: data.email,
       phone: data.phone,
-      plan: "free",
-      createdAt: new Date().toISOString().split("T")[0]
+      role: "user",
+      status: "pending",
+      createdAt: new Date().toISOString(),
     };
-    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify({ email: data.email, token: "session-token-" + Date.now() }));
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
-    return user;
   },
 
-  async logout(): Promise<void> {
-    await delay(200);
-    await AsyncStorage.removeItem(AUTH_KEY);
+  /**
+   * Connexion réelle via Supabase Auth.
+   */
+  async signIn(email: string, password: string): Promise<User> {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      logger.warn(TAG, "Échec connexion", error.message);
+      throw new Error(translateAuthError(error.message));
+    }
+
+    const userId = data.user?.id;
+    if (!userId) throw new Error("Session invalide après connexion.");
+
+    const profile = await fetchProfile(userId);
+    if (!profile) {
+      throw new Error("Profil introuvable. Contactez le support.");
+    }
+    return profile;
   },
 
-  async restoreSession(): Promise<User | null> {
-    try {
-      const authData = await AsyncStorage.getItem(AUTH_KEY);
-      if (!authData) return null;
-      const userData = await AsyncStorage.getItem(USER_KEY);
-      if (!userData) return null;
-      return JSON.parse(userData) as User;
-    } catch {
-      return null;
+  /**
+   * Déconnexion réelle.
+   */
+  async signOut(): Promise<void> {
+    const { error } = await getSupabase().auth.signOut();
+    if (error) {
+      logger.warn(TAG, "Échec déconnexion", error.message);
+      throw new Error("Impossible de se déconnecter.");
     }
   },
 
-  async updateProfile(updates: Partial<User>): Promise<User> {
-    await delay(500);
-    const userData = await AsyncStorage.getItem(USER_KEY);
-    if (!userData) throw new Error("Utilisateur non trouvé");
-    const user = { ...JSON.parse(userData) as User, ...updates };
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
-    return user;
-  },
-
+  /**
+   * Mot de passe oublié (lien de réinitialisation).
+   */
   async requestPasswordReset(email: string): Promise<void> {
-    await delay(1500);
-    if (!email) throw new Error("Email requis");
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email);
+    if (error) {
+      logger.warn(TAG, "Échec reset lien", error.message);
+      throw new Error(translateAuthError(error.message));
+    }
   },
 
-  async verifyEmail(code: string): Promise<void> {
-    await delay(1000);
-    if (!code || code.length < 4) {
-      throw new Error("Code de vérification invalide");
+  /**
+   * Mise à jour du profil.
+   */
+  async updateProfile(updates: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+  }): Promise<User> {
+    const supabase = getSupabase();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("Non connecté.");
+
+    const fullName = `${updates.firstName ?? ""} ${updates.lastName ?? ""}`.trim();
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({
+        ...(updates.firstName !== undefined ? { first_name: updates.firstName } : {}),
+        ...(updates.lastName !== undefined ? { last_name: updates.lastName } : {}),
+        ...(fullName ? { full_name: fullName } : {}),
+        ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
+      })
+      .eq("id", user.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      logger.warn(TAG, "Échec maj profil", error.message);
+      throw new Error("Impossible de mettre à jour le profil.");
     }
-  }
+    return mapProfileToUser(data);
+  },
 };
+
+function translateAuthError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("invalid login credentials")) return "Email ou mot de passe incorrect.";
+  if (lower.includes("email not confirmed")) return "Veuillez confirmer votre email avant de vous connecter.";
+  if (lower.includes("user already registered")) return "Un compte existe déjà avec cet email.";
+  if (lower.includes("password should be at least")) return "Le mot de passe doit contenir au moins 6 caractères.";
+  if (lower.includes("user not found")) return "Aucun compte trouvé avec cet email.";
+  if (lower.includes("rate limit")) return "Trop de tentatives. Réessayez plus tard.";
+  return "Une erreur est survenue. Réessayez.";
+}

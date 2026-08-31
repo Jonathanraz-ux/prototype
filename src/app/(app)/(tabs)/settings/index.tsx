@@ -8,9 +8,9 @@ import {
   HelpCircle,
   Lock,
   FileText,
-  Shield,
   Bell,
-  LogOut
+  LogOut,
+  type LucideIcon
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { COLORS, SPACING, ANIMATION_DURATION } from "../../../../constants/theme";
@@ -55,7 +55,7 @@ function SettingRow({
   description: string;
   value: boolean;
   onToggle: () => void;
-  icon?: React.ComponentType<{ color: string; size: number }>;
+  icon?: LucideIcon;
   color?: string;
 }) {
   return (
@@ -85,7 +85,7 @@ function InfoRow({
 }: {
   label: string;
   description: string;
-  icon: React.ComponentType<{ color: string; size: number }>;
+  icon: LucideIcon;
   color: string;
   onPress?: () => void;
 }) {

@@ -6,6 +6,7 @@ export const COLORS = {
   primaryLight: "#3B82F6",
   primaryDark: "#1D4ED8",
   accent: "#38BDF8",
+  accentSoft: "#7DD3FC",
   success: "#22C55E",
   warning: "#F59E0B",
   danger: "#EF4444",
@@ -83,5 +84,3 @@ export const ANIMATION_DURATION = {
   slow: 500,
   extraSlow: 800
 };
-
-export const MOCK_DELAY = 800;

@@ -7,8 +7,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  TextInput,
-  ActivityIndicator
+  TextInput
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Mail, Lock, ArrowRight, Wifi } from "lucide-react-native";

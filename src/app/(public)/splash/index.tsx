@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { View, Text, Animated, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../../constants/theme";
-import { Wifi } from "lucide-react-native";
+import WLogo from "../../../components/WLogo";
 
 function AnimatedDot({ delay }: { delay: number }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -73,7 +73,7 @@ export default function SplashScreen() {
       <Animated.View style={{ transform: [{ scale: scaleAnim }, { translateY: logoOffset }], alignItems: "center" }}>
         <Animated.View style={[styles.outerRing, { opacity: ringOpacity, transform: [{ scale: ringScale }] }]} />
         <View style={styles.logoContainer}>
-          <Wifi color={COLORS.primary} size={48} />
+          <WLogo size={56} />
         </View>
         <Text style={styles.appName}>WiFi Zone</Text>
         <Text style={styles.tagline}>CONNEXION PREMIUM</Text>
