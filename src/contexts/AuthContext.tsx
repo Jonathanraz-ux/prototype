@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { getSupabase } from "../lib/supabase";
 import { AuthService } from "../services/auth";
+import { setupPushNotifications, deactivatePushToken } from "../services/notifications";
 import { logger } from "../lib/logger";
 import type { User, RegisterData } from "../types";
 
@@ -72,6 +73,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Configurer le push après une authentification réussie (non bloquant).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      setupPushNotifications().catch(() => {
+        // Ne jamais faire échouer le flux d'authentification à cause du push.
+      });
+    }, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [user?.id]);
+
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
@@ -93,6 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    await deactivatePushToken();
     await AuthService.signOut();
     setUser(null);
   }, []);

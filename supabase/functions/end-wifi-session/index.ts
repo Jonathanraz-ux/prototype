@@ -6,6 +6,7 @@
 
 import { handleCors, ok, fail, methodNotAllowed } from "../_shared/http.ts";
 import { publicClient, serviceClient } from "../_shared/supabase.ts";
+import { sendPush } from "../_shared/push.ts";
 
 interface EndSessionBody {
   session_id?: string;
@@ -57,6 +58,22 @@ export async function endWifiSession(req: Request): Promise<Response> {
 
   if (error) {
     return ok({ success: false });
+  }
+
+  // Avertir l'utilisateur de la fin de sa session (notification interne + push).
+  if (data === true) {
+    const reason = body.reason ?? "user_disconnected";
+    const message =
+      reason === "quota_exceeded"
+        ? "Votre quota de données est épuisé. La session Wi-Fi a été interrompue."
+        : "Votre session Wi-Fi s'est terminée.";
+    await sendPush({
+      user_id: user.id,
+      title: "Session Wi-Fi terminée",
+      body: message,
+      type: "quota",
+      data: { session_id: body.session_id },
+    });
   }
 
   return ok({ success: data === true });

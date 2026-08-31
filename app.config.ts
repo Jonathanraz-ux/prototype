@@ -50,7 +50,15 @@ const config: ExpoConfig = {
     }
   },
   plugins: [
-    "expo-router"
+    "expo-router",
+    [
+      "expo-notifications",
+      {
+        icon: "./src/assets/images/adaptive-icon.png",
+        color: "#F97316",
+        defaultChannel: "default",
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true

@@ -96,3 +96,23 @@ export async function registerPushToken(token: string): Promise<"NOT_CONFIGURED"
   }
   return "registered";
 }
+
+/**
+ * Désactive les tokens push de l'utilisateur courant (à la déconnexion).
+ * Empêche l'envoi de notifications une fois déconnecté.
+ */
+export async function deactivatePushToken(): Promise<void> {
+  try {
+    const {
+      data: { user },
+    } = await getSupabase().auth.getUser();
+    if (!user) return;
+    await getSupabase()
+      .from("push_tokens")
+      .update({ active: false })
+      .eq("user_id", user.id)
+      .eq("active", true);
+  } catch {
+    // silencieux : la déconnexion ne doit jamais échouer à cause du push
+  }
+}

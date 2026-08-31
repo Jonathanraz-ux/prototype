@@ -14,3 +14,8 @@ export {
   getLastRefreshDashboard,
   setLastRefreshDashboard
 } from "./storage";
+export {
+  setupPushNotifications,
+  requestNotificationPermission,
+  ensureAndroidChannel
+} from "./notifications";
