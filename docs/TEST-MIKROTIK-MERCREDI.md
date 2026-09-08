@@ -17,6 +17,27 @@ jamais générer d'APK.
 > connectés** à ce jour : l'agent (`offline`) et le routeur (`offline`) sont donc
 > au repos. Rien n'a été poussé vers Git et aucun APK n'a été généré.
 
+> **Rotation des secrets de l'agent (2026-09-08)** : `AGENT_TOKEN` et
+> `NETWORK_HMAC_SECRET` ont été **régénérés** (32 octets aléatoires chacun) suite à
+> l'exposition du précédent. Les valeurs sont uniquement dans `agent/.env` (ignoré
+> de Git), dans la base (hash SHA-256 du token) et dans les secrets des Edge
+> Functions (voir le PAT révoqué). Le **PAT Management `sbp_…` précédent a été
+> révoqué par l'utilisateur** et remplacé. Aucune valeur n'a été reportée dans ce
+> document, dans une migration ni dans un commit.
+
+> **Architecture retenue** : **Application → Edge Functions déployées → file de
+> commandes (`network_commands`) → agent local → MikroTik.** L'autorisation, la
+> collecte du trafic et la déconnexion passent par les fonctions `agent-*`
+> déployées (`request-wifi-session` enfile la commande signée ; l'agent tire via
+> `agent-command-fetch`, signe avec `NETWORK_HMAC_SECRET`, exécute et remonte le
+> résultat via `agent-command-result` ; `agent-collect`/`agent-reconcile`/
+> `agent-ping`/`agent-expire` complètent le cycle, `expire-stale-sessions` exécute
+> l'expiration heartbeat). Les cinq fonctions locales **non déployées**
+> (`network-mikrotik-authorize`, `network-mikrotik-disconnect`,
+> `network-radius-authorize`, `network-radius-disconnect`, `network-session-usage`)
+> sont des **stubs de l'ancienne architecture directe** et ne sont **pas
+> nécessaires** au parcours de demain.
+
 ---
 
 ## 1. Avant de partir (sans le routeur)
