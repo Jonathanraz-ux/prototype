@@ -34,3 +34,5 @@ export async function networkSessionUsage(req: Request): Promise<Response> {
   // Tant que l'équipement n'est pas joignable, on rapporte "indisponible".
   return ok({ consumed_seconds: 0, consumed_bytes: 0, available: false });
 }
+
+Deno.serve(networkSessionUsage);

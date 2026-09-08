@@ -1,76 +1,100 @@
+// ============================================================
+// connectionMachine.ts — Machine à états de connexion, ALIGNÉE sur
+// le serveur (migration 0008 / session-machine.ts des Edge Functions).
+//
+// Le téléphone n'est PAS la source de vérité : il ne fait que refléter
+// l'état de la session côté serveur (quota-status) et battre pour la
+// maintenir vivante (ad-heartbeat). La machine reste pure (testable).
+// ============================================================
+
 import type { ConnectionState, DisconnectReason } from "../types";
 
-type Transition = {
+export const CONNECTION_ACTIONS = {
+  CONNECT: "CONNECT",
+  AD_AVAILABLE: "AD_AVAILABLE",
+  AD_WATCHED: "AD_WATCHED",
+  AD_FAILED: "AD_FAILED",
+  SESSION_STARTED: "SESSION_STARTED",
+  SESSION_AUTHORIZED: "SESSION_AUTHORIZED",
+  HB_OK: "HB_OK",
+  PAUSE: "PAUSE",
+  RESUME: "RESUME",
+  QUOTA_EXHAUSTED: "QUOTA_EXHAUSTED",
+  ERROR: "ERROR",
+  DISCONNECT: "DISCONNECT",
+  DISCONNECTED: "DISCONNECTED",
+  RESET: "RESET",
+} as const;
+
+interface Transition {
   from: ConnectionState[];
   to: ConnectionState;
   action: string;
   reason?: DisconnectReason;
-};
+}
 
 const TRANSITIONS: Transition[] = [
-  { from: ["deconnected"], to: "connecting", action: "CONNECT" },
-  { from: ["connecting"], to: "connected", action: "CONNECT_SUCCESS" },
-  { from: ["connecting"], to: "network_error", action: "CONNECT_FAIL" },
-  { from: ["connected"], to: "ad_found", action: "AD_FOUND" },
-  { from: ["ad_found"], to: "connected", action: "AD_REMOVED" },
-  { from: ["connected", "ad_found"], to: "ad_missing", action: "AD_MISSING" },
-  { from: ["connected", "ad_found"], to: "quota_exhausted", action: "QUOTA_EXHAUSTED" },
-  { from: ["connected", "ad_found"], to: "suspended", action: "SUSPEND" },
-  { from: ["ad_missing"], to: "deconnected", action: "DISCONNECT", reason: "ad_closed" },
-  { from: ["quota_exhausted"], to: "deconnected", action: "DISCONNECT", reason: "quota_exhausted" },
-  { from: ["suspended"], to: "deconnected", action: "DISCONNECT", reason: "suspended" },
-  { from: ["network_error"], to: "deconnected", action: "DISCONNECT", reason: "network_error" },
-  { from: ["connected", "ad_found", "deconnected"], to: "deconnected", action: "LOGOUT", reason: "user_disconnected" },
-  { from: ["ad_missing", "quota_exhausted", "suspended", "network_error"], to: "deconnected", action: "RESET" },
-  { from: ["deconnected"], to: "deconnected", action: "STAY_DISCONNECTED" },
+  // ----- Déclenchement depuis l'idle -----
+  { from: ["idle", "quota_exhausted", "error", "paused"], to: "ad_loading", action: "CONNECT" },
+  { from: ["ad_loading", "ad_active"], to: "ad_active", action: "AD_AVAILABLE" },
+  { from: ["ad_loading", "ad_active"], to: "error", action: "AD_FAILED" },
+
+  // ----- Publicité terminée : demande de session Wi-Fi -----
+  { from: ["ad_active"], to: "authorizing_wifi", action: "AD_WATCHED" },
+  { from: ["authorizing_wifi"], to: "wifi_active", action: "SESSION_AUTHORIZED" },
+  { from: ["authorizing_wifi", "wifi_active", "paused"], to: "quota_exhausted", action: "QUOTA_EXHAUSTED" },
+  { from: ["authorizing_wifi"], to: "error", action: "ERROR" },
+
+  // ----- Session active -----
+  { from: ["wifi_active"], to: "paused", action: "PAUSE" },
+  { from: ["paused"], to: "wifi_active", action: "RESUME" },
+  { from: ["wifi_active", "paused"], to: "disconnecting", action: "DISCONNECT", reason: "USER_PAUSED_AD" },
+
+  // ----- Rattrapage d'état serveur -----
+  { from: ["paused", "wifi_active", "authorizing_wifi"], to: "wifi_active", action: "HB_OK" },
+
+  // ----- Déconnexion -----
+  { from: ["disconnecting"], to: "idle", action: "DISCONNECTED", reason: "USER_LOGOUT" },
+  { from: ["error"], to: "idle", action: "DISCONNECTED", reason: "ROUTER_ERROR" },
+
+  // ----- Retour à l'accueil -----
+  { from: ["quota_exhausted", "error", "paused", "wifi_active", "authorizing_wifi", "disconnecting", "ad_active", "ad_loading"], to: "idle", action: "RESET" },
 ];
 
 export function canTransition(from: ConnectionState, action: string): ConnectionState | null {
-  const transition = TRANSITIONS.find(
-    (t) => t.from.includes(from) && t.action === action
+  const match = TRANSITIONS.find(
+    (t) => t.action === action && t.from.includes(from)
   );
-  return transition ? transition.to : null;
+  return match ? match.to : null;
 }
 
 export function getDisconnectReason(from: ConnectionState, action: string): DisconnectReason | undefined {
-  const transition = TRANSITIONS.find(
-    (t) => t.from.includes(from) && t.action === action
+  const match = TRANSITIONS.find(
+    (t) => t.action === action && t.from.includes(from)
   );
-  return transition?.reason;
+  return match?.reason;
 }
 
-export const CONNECTION_ACTIONS = {
-  CONNECT: "CONNECT" as const,
-  CONNECT_SUCCESS: "CONNECT_SUCCESS" as const,
-  CONNECT_FAIL: "CONNECT_FAIL" as const,
-  AD_FOUND: "AD_FOUND" as const,
-  AD_REMOVED: "AD_REMOVED" as const,
-  AD_MISSING: "AD_MISSING" as const,
-  QUOTA_EXHAUSTED: "QUOTA_EXHAUSTED" as const,
-  SUSPEND: "SUSPEND" as const,
-  DISCONNECT: "DISCONNECT" as const,
-  LOGOUT: "LOGOUT" as const,
-  RESET: "RESET" as const,
-  STAY_DISCONNECTED: "STAY_DISCONNECTED" as const,
-} as const;
-
 export const STATE_LABELS: Record<ConnectionState, string> = {
-  deconnected: "Déconnecté",
-  connecting: "Connexion en cours",
-  connected: "Connecté",
-  ad_found: "Publicité active",
-  ad_missing: "Publicité absente",
+  idle: "En attente",
+  ad_loading: "Recherche de publicité",
+  ad_active: "Publicité en cours",
+  authorizing_wifi: "Autorisation Wi-Fi",
+  wifi_active: "Connecté",
+  paused: "En pause",
   quota_exhausted: "Quota épuisé",
-  suspended: "Connexion suspendue",
-  network_error: "Erreur réseau"
+  error: "Erreur",
+  disconnecting: "Déconnexion",
 };
 
-export const REASON_LABELS: Record<DisconnectReason, string> = {
-  ad_closed: "Publicité fermée",
-  ad_hidden: "Publicité masquée",
-  quota_exhausted: "Quota épuisé",
-  session_expired: "Session expirée",
-  network_error: "Erreur réseau",
-  user_disconnected: "Déconnexion utilisateur",
-  suspended: "Connexion suspendue"
-};
+// Motifs normalisés du serveur (session-machine.ts) — jamais réinventés.
+export const REASON_LABELS: Record<string, string> = {
+  USER_PAUSED_AD: "Pause publicitaire",
+  APP_BACKGROUND: "Application mise en arrière-plan",
+  USER_LOGOUT: "Déconnexion de l'utilisateur",
+  HEARTBEAT_TIMEOUT: "Battement arrêté (grâce dépassée)",
+  QUOTA_EXHAUSTED: "Quota de données épuisé",
+  NETWORK_LOST: "Liaison réseau perdue",
+  ADMIN_DISCONNECT: "Déconnecté par un administrateur",
+  ROUTER_ERROR: "Erreur routeur",
+}

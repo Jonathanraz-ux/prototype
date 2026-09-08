@@ -18,6 +18,7 @@ web-build/
 .env
 .env.*
 !.env.example
+!agent/.env.example.agent
 .env*.local
 
 # supabase local linker metadata (may contain pooler URL / refs)

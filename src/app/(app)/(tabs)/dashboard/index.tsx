@@ -2,17 +2,31 @@ import React, { useRef, useEffect, useState, useCallback } from "react";
 import { View, Text, Animated, Pressable, ActivityIndicator, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import { COLORS, GRADIENTS } from "../../../../constants/theme";
 import { useAuth } from "../../../../contexts/AuthContext";
 import { useConnection } from "../../../../contexts/ConnectionContext";
-import { Play, Power, AlertTriangle } from "lucide-react-native";
+import { Play, Power, AlertTriangle, ServerCog } from "lucide-react-native";
 import HeroAdCard from "../../../../components/HeroAdCard";
 import ConnectionStatusCard from "../../../../components/ConnectionStatusCard";
 import RefreshButton from "../../../../components/RefreshButton";
 
 export default function DashboardScreen() {
-  const { user } = useAuth();
-  const { state, internetStatus, usage, connect, disconnect, refillQuota, currentAd } = useConnection();
+  const { user, isAdmin, isSiteManager } = useAuth();
+  const {
+    state,
+    internetStatus,
+    usage,
+    stateLabel,
+    reasonLabel,
+    connect,
+    disconnect,
+    refillQuota,
+    currentAd,
+    networkHealth,
+    lastSyncAt,
+  } = useConnection();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(true);
@@ -24,7 +38,7 @@ export default function DashboardScreen() {
     return () => clearTimeout(t);
   }, [fadeAnim]);
 
-  const connecting = state === "connecting";
+  const isConnecting = state === "ad_loading" || state === "authorizing_wifi";
   const isActive = internetStatus === "active";
 
   const handleRefresh = useCallback(async () => {
@@ -33,22 +47,29 @@ export default function DashboardScreen() {
     setIsRefreshing(false);
   }, []);
 
-  const handleConnect = async () => {
-    await connect();
+  const handleConnect = () => {
+    void connect();
   };
 
-  const handleDisconnect = async () => {
-    await disconnect();
+  const handleDisconnect = () => {
+    void disconnect();
   };
 
   const percent = usage.totalQuotaMB > 0 ? (usage.remainingQuotaMB / usage.totalQuotaMB) * 100 : 0;
 
   const renderAction = () => {
     // Publicité en cours de lecture obligatoire : aucun bouton.
-    if (state === "connecting" || state === "ad_found" || currentAd) return null;
+    if (
+      state === "ad_loading" ||
+      state === "ad_active" ||
+      state === "authorizing_wifi" ||
+      state === "disconnecting" ||
+      currentAd
+    ) {
+      return null;
+    }
 
-    // Internet actif : seule action = se déconnecter
-    if (state === "connected") {
+    if (state === "wifi_active") {
       return (
         <Pressable
           onPress={handleDisconnect}
@@ -60,21 +81,33 @@ export default function DashboardScreen() {
       );
     }
 
+    if (state === "paused") {
+      return (
+        <Pressable
+          onPress={handleConnect}
+          style={({ pressed }) => [styles.alertButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
+        >
+          <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+          <Text style={styles.alertButtonText}>Reprendre la session</Text>
+        </Pressable>
+      );
+    }
+
     if (state === "quota_exhausted") {
       return (
         <View style={styles.alertWrap}>
           <View style={styles.alertRow}>
             <AlertTriangle color={COLORS.warning} size={16} />
             <Text style={styles.alertText} numberOfLines={1}>
-              Quota épuisé — renouvelez pour rester connecté
+              Quota épuisé — la réinitialisation est réservée à un administrateur
             </Text>
           </View>
           <Pressable
-            onPress={refillQuota}
+            onPress={() => void refillQuota()}
             style={({ pressed }) => [styles.alertButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
           >
             <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-            <Text style={styles.alertButtonText}>Regarder une publicité</Text>
+            <Text style={styles.alertButtonText}>Vérifier le quota</Text>
           </Pressable>
         </View>
       );
@@ -83,17 +116,17 @@ export default function DashboardScreen() {
     return (
       <Pressable
         onPress={handleConnect}
-        disabled={connecting}
+        disabled={isConnecting}
         style={({ pressed }) => [
           styles.connectWrap,
           {
-            opacity: connecting ? 0.85 : 1,
-            transform: [{ scale: pressed && !connecting ? 0.98 : 1 }]
+            opacity: isConnecting ? 0.85 : 1,
+            transform: [{ scale: pressed && !isConnecting ? 0.98 : 1 }]
           }
         ]}
       >
         <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-        {connecting ? (
+        {isConnecting ? (
           <ActivityIndicator size="small" color="#FFFFFF" />
         ) : (
           <>
@@ -129,6 +162,8 @@ export default function DashboardScreen() {
               Bonjour <Text style={{ color: COLORS.accentSoft }}>{user?.firstName ?? ""}</Text>
             </Text>
             <Text style={styles.subtitle}>Connexion financée par la publicité</Text>
+            {state !== "idle" && <Text style={styles.subtitle}>{stateLabel}</Text>}
+            {reasonLabel && <Text style={styles.reason}>{reasonLabel}</Text>}
           </View>
           <RefreshButton refreshing={isRefreshing} onPress={handleRefresh} />
         </View>
@@ -139,46 +174,39 @@ export default function DashboardScreen() {
 
         <ConnectionStatusCard
           connected={isActive}
-          connecting={connecting}
+          connecting={isConnecting}
           percent={percent}
           timeMinutes={usage.remainingTimeMinutes}
           quotaMB={usage.remainingQuotaMB}
+          consumedMB={usage.todayConsumptionMB}
+          totalQuotaMB={usage.totalQuotaMB}
+          networkHealth={networkHealth}
+          lastSyncAt={lastSyncAt}
         />
 
         {renderAction()}
+
+        {(isAdmin || isSiteManager) && (
+          <Pressable
+            onPress={() => router.push("/(app)/admin" as never)}
+            style={({ pressed }) => [styles.adminLink, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <ServerCog color={COLORS.textSecondary} size={16} />
+            <Text style={styles.adminLinkText}>Espace administrateur</Text>
+          </Pressable>
+        )}
       </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: COLORS.background
-  },
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 104,
-    gap: 14
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16
-  },
-  title: {
-    color: "#FFFFFF",
-    fontSize: 27,
-    lineHeight: 34,
-    fontFamily: "Inter-Bold"
-  },
-  subtitle: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    marginTop: 2,
-    fontFamily: "Inter-Regular"
-  },
+  screen: { flex: 1, backgroundColor: COLORS.background },
+  container: { flex: 1, paddingHorizontal: 20, paddingBottom: 104, gap: 14 },
+  header: { flexDirection: "row", alignItems: "center", gap: 16 },
+  title: { color: "#FFFFFF", fontSize: 27, lineHeight: 34, fontFamily: "Inter-Bold" },
+  subtitle: { color: COLORS.textSecondary, fontSize: 13, marginTop: 2, fontFamily: "Inter-Regular" },
+  reason: { color: COLORS.warning, fontSize: 12, marginTop: 2, fontFamily: "Inter-Regular" },
   connectWrap: {
     height: 56,
     borderRadius: 18,
@@ -193,11 +221,7 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 10
   },
-  connectText: {
-    color: "#FFFFFF",
-    fontSize: 15.5,
-    fontFamily: "Inter-Bold"
-  },
+  connectText: { color: "#FFFFFF", fontSize: 15.5, fontFamily: "Inter-Bold" },
   disconnectButton: {
     height: 56,
     borderRadius: 18,
@@ -209,11 +233,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(239, 68, 68, 0.3)"
   },
-  disconnectText: {
-    color: COLORS.danger,
-    fontSize: 15.5,
-    fontFamily: "Inter-Bold"
-  },
+  disconnectText: { color: COLORS.danger, fontSize: 15.5, fontFamily: "Inter-Bold" },
   alertWrap: {
     borderRadius: 18,
     borderWidth: 1,
@@ -222,17 +242,8 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 12
   },
-  alertRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8
-  },
-  alertText: {
-    flex: 1,
-    color: COLORS.warning,
-    fontSize: 13,
-    fontFamily: "Inter-Regular"
-  },
+  alertRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  alertText: { flex: 1, color: COLORS.warning, fontSize: 13, fontFamily: "Inter-Regular" },
   alertButton: {
     height: 46,
     borderRadius: 14,
@@ -240,12 +251,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden"
   },
-  alertButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontFamily: "Inter-Bold"
-  },
-  skeleton: {
-    backgroundColor: COLORS.card
-  }
+  alertButtonText: { color: "#FFFFFF", fontSize: 14, fontFamily: "Inter-Bold" },
+  adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  adminLinkText: { color: COLORS.textSecondary, fontSize: 13, fontFamily: "Inter-Regular" },
+  skeleton: { backgroundColor: COLORS.card }
 });

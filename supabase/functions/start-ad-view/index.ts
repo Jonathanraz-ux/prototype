@@ -137,3 +137,5 @@ function mapCampaign(row: Record<string, unknown>) {
     type: /\.(mp4|mov|m4v)(\?|$)/i.test(media) ? "video" : "image",
   };
 }
+
+Deno.serve(startAdView);

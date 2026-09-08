@@ -32,3 +32,5 @@ export async function networkRadiusDisconnect(req: Request): Promise<Response> {
   // 👇 Intégration FreeRADIUS réelle (RADIUS Disconnect-Request) à implémenter.
   return ok({ success: false, health: "UNREACHABLE", reason: "unreachable" });
 }
+
+Deno.serve(networkRadiusDisconnect);

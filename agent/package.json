@@ -1,0 +1,17 @@
+{
+  "name": "wifizone-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent local WiFi Zone — pont Supabase <-> MikroTik RouterOS (REST ou API binaire). Préparation du test physique.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node main.mjs",
+    "mock": "node main.mjs --mock",
+    "register": "node register.mjs",
+    "test": "node --test test/",
+    "check": "node --check config.mjs && node --check main.mjs && node --check engine.mjs && node --check lib/signatures.mjs"
+  }
+}

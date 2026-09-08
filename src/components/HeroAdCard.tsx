@@ -23,8 +23,8 @@ export default function HeroAdCard() {
   const [mediaFailed, setMediaFailed] = useState(false);
   const [buffering, setBuffering] = useState(false);
 
-  const isWatching = state === "ad_found" || state === "connecting";
-  const completed = state === "connected" && !currentAd;
+  const isWatching = state === "ad_active" || state === "ad_loading";
+  const completed = state === "wifi_active" || state === "authorizing_wifi";
 
   // Réinitialiser les erreurs média quand une nouvelle pub arrive.
   useEffect(() => {

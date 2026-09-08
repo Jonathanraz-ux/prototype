@@ -32,3 +32,5 @@ export async function networkMikrotikDisconnect(req: Request): Promise<Response>
   // 👇 Intégration RouterOS réelle à implémenter ici.
   return ok({ success: false, health: "UNREACHABLE", reason: "unreachable" });
 }
+
+Deno.serve(networkMikrotikDisconnect);

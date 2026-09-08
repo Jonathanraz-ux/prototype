@@ -24,6 +24,10 @@ interface ConnectionStatusCardProps {
   percent: number;
   timeMinutes: number;
   quotaMB: number;
+  consumedMB?: number;
+  totalQuotaMB?: number;
+  networkHealth?: string;
+  lastSyncAt?: string | null;
 }
 
 export default function ConnectionStatusCard({
@@ -31,10 +35,27 @@ export default function ConnectionStatusCard({
   connecting = false,
   percent,
   timeMinutes,
-  quotaMB
+  quotaMB,
+  consumedMB = 0,
+  totalQuotaMB = 0,
+  networkHealth,
+  lastSyncAt
 }: ConnectionStatusCardProps) {
   const statusColor = connected ? COLORS.success : connecting ? COLORS.warning : COLORS.textMuted;
-  const statusLabel = connected ? "Internet actif" : connecting ? "Connexion en cours" : "Internet coupé";
+  const statusLabel = connected ? "Wi-Fi gratuit actif" : connecting ? "Autorisation en cours" : "Accès coupé";
+
+  const healthLabel = networkHealth
+    ? {
+        READY: "Agent & routeur opérationnels",
+        AUTHENTICATION_FAILED: "Échec d'authentification routeur",
+        UNREACHABLE: "Agent en ligne / routeur injoignable",
+        NOT_CONFIGURED: "Agent non configuré",
+        ERROR: "Erreur de connexion",
+      }[networkHealth] ?? "État de connexion"
+    : "État de connexion";
+
+  const healthColor =
+    networkHealth === "READY" ? COLORS.success : networkHealth === "NOT_CONFIGURED" ? COLORS.textMuted : COLORS.warning;
 
   return (
     <View style={styles.card}>
@@ -52,6 +73,12 @@ export default function ConnectionStatusCard({
         <Text style={styles.percent}>{Math.round(percent)}%</Text>
         <Text style={styles.percentLabel}>de quota restant</Text>
       </View>
+
+      {(totalQuotaMB > 0) && (
+        <Text style={styles.quotaType}>
+          Quota initial : {formatDataFR(totalQuotaMB)} · consommé : {formatDataFR(consumedMB)}
+        </Text>
+      )}
 
       <View style={styles.divider} />
 
@@ -76,6 +103,24 @@ export default function ConnectionStatusCard({
           </View>
         </View>
       </View>
+
+      {(networkHealth || lastSyncAt) && (
+        <View style={styles.footer}>
+          {networkHealth && (
+            <View style={styles.footerRow}>
+              <View style={[styles.miniDot, { backgroundColor: healthColor }]} />
+              <Text numberOfLines={1} style={[styles.footerText, { color: healthColor }]}>
+                {healthLabel}
+              </Text>
+            </View>
+          )}
+          {lastSyncAt && (
+            <Text style={styles.syncText}>
+              Dernière synchronisation : {new Date(lastSyncAt).toLocaleTimeString()}
+            </Text>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -130,6 +175,12 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12
   },
+  quotaType: {
+    color: COLORS.textMuted,
+    fontSize: 11.5,
+    marginTop: 4,
+    fontFamily: "Inter-Regular"
+  },
   percent: {
     color: COLORS.accentSoft,
     fontSize: 32,
@@ -181,5 +232,32 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     marginTop: 2,
     fontFamily: "Inter-Bold"
+  },
+  footer: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+    gap: 4
+  },
+  footerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6
+  },
+  miniDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4
+  },
+  footerText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontFamily: "Inter-Regular"
+  },
+  syncText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontFamily: "Inter-Regular"
   }
 });

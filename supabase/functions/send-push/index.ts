@@ -46,3 +46,5 @@ export async function sendPush(req: Request): Promise<Response> {
     skipped: result.skipped,
   });
 }
+
+Deno.serve(sendPush);

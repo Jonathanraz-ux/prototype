@@ -147,3 +147,5 @@ async function signLicenseToken(payload: Record<string, unknown>): Promise<strin
   const b64sig = btoa(String.fromCharCode(...new Uint8Array(sig)));
   return `${data}.${b64sig}`;
 }
+
+Deno.serve(checkLicense);

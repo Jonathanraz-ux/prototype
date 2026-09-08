@@ -45,3 +45,5 @@ export async function networkRadiusAuthorize(req: Request): Promise<Response> {
 
   return ok({ success: true, reference });
 }
+
+Deno.serve(networkRadiusAuthorize);

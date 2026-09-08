@@ -1,11 +1,16 @@
 // ============================================================
-// network-health — État de santé de l'adaptateur réseau configuré.
-// Le téléphone n'a aucun secret : cette fonction reflète l'état
-// réel du serveur (configuré ou non).
+// network-health — État de santé de la chaîne réseau.
+//
+// Pour le test MikroTik : l'adaptateur « mikrotik » est piloté par
+// l'AGENT LOCAL (file network_commands + API RouterOS), plus par le
+// serveur directement. La santé reflète donc :
+//   - la configuration serveur (NETWORK_ADAPTER_TYPE, MIKROTIK_HOST) ;
+//   - la présence d'un agent local enregistré et ONLINE ;
+//   - l'état des routeurs connus du site.
 // ============================================================
 
 import { handleCors, ok, fail, methodNotAllowed } from "../_shared/http.ts";
-import { resolveNetworkConfig, matchesAdapter, type NetworkHealth } from "../_shared/network-config.ts";
+import { resolveNetworkConfig, type NetworkConfig } from "../_shared/network-config.ts";
 
 interface HealthBody {
   adapter?: string;
@@ -20,42 +25,59 @@ export async function networkHealth(req: Request): Promise<Response> {
   try {
     body = await req.json();
   } catch {
-    // corps vide accepté
+    body = {};
   }
 
-  const cfg = resolveNetworkConfig();
+  const cfg: NetworkConfig = resolveNetworkConfig();
 
   if (body.adapter && cfg.adapterType && body.adapter !== cfg.adapterType) {
-    // L'app demande un adaptateur différent de celui configuré.
-    return ok({ configured: false, health: "NOT_CONFIGURED" });
+    return ok({ configured: false, health: "NOT_CONFIGURED", adapterType: cfg.adapterType });
   }
 
-  // Pour un prototype : tant que l'équipement réel n'est pas joignable,
-  // on répercute l'état réel de la configuration. En présence d'un
-  // équipement réel, effectuer ici le ping réseau réel.
-  if (!cfg.configured || cfg.adapterType === "development" || !cfg.adapterType) {
-    return ok({ configured: false, health: "NOT_CONFIGURED" });
+  if (!cfg.configured || !cfg.adapterType) {
+    return ok({ configured: false, health: cfg.health, adapterType: cfg.adapterType });
   }
 
-  const health: NetworkHealth = await probeReachability(cfg.adapterType as "mikrotik" | "radius");
-  return ok({ configured: true, health });
+  // Chaîne MikroTik pilotée par l'agent : pas de prétention de READY
+  // sans agent enregistré et en ligne.
+  let agents: Array<Record<string, unknown>> = [];
+  let routers: Array<Record<string, unknown>> = [];
+  if (cfg.adapterType === "mikrotik") {
+    const { serviceClient } = await import("../_shared/supabase.ts");
+    const admin = serviceClient();
+    const [{ data: a }, { data: r }] = await Promise.all([
+      admin
+        .from("local_agents")
+        .select("id, name, status, site_id, last_seen_at")
+        .order("last_seen_at", { ascending: false })
+        .limit(5),
+      admin
+        .from("routers")
+        .select("id, name, model, status, site_id, last_seen_at")
+        .limit(20),
+    ]);
+    agents = (a ?? []) as Array<Record<string, unknown>>;
+    routers = (r ?? []) as Array<Record<string, unknown>>;
+  }
+
+  const agentOnline = agents.some((ag) => ag.status === "online");
+  const routerOnline = routers.some((rt) => rt.status === "active" || rt.status === "online");
+
+  let health: NetworkConfig["health"] = cfg.health;
+  if (cfg.adapterType === "mikrotik") {
+    if (!agentOnline) health = "UNREACHABLE";
+    if (!routers.length) health = "NOT_CONFIGURED";
+  }
+
+  return ok({
+    configured: cfg.configured,
+    health,
+    adapterType: cfg.adapterType,
+    agents,
+    routers,
+    agentOnline,
+    routerOnline,
+  });
 }
 
-// Réel : remplacer par un ping HTTP / protocole vers MIKROTIK_HOST ou
-// RADIUS_HOST. Pour éviter un faux "READY", on renvoie UNREACHABLE tant
-// que l'équipement réel n'a pas répondu.
-async function probeReachability(type: "mikrotik" | "radius"): Promise<NetworkHealth> {
-  try {
-    const host = type === "mikrotik"
-      ? Deno.env.get("MIKROTIK_HOST")
-      : Deno.env.get("RADIUS_HOST");
-    if (!host) return "NOT_CONFIGURED";
-
-    // Tenir compte du fait que plusieurs hôtes peuvent être listés.
-    // Ici : implémenter le probe réel selon l'équipement. Sans protocole
-    // implémenté, on ne prétend jamais être prêt.
-    return "UNREACHABLE";
-  } catch {
-    return "ERROR";
-  }
-}
+Deno.serve(networkHealth);

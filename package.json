@@ -11,6 +11,7 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:functions": "deno test supabase/functions/_shared/",
     "typecheck": "tsc --noEmit",
     "db:push": "supabase db push --include-all",
     "db:reset": "supabase db reset",

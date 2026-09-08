@@ -21,10 +21,12 @@ export type AdCompletionStatus = "completed" | "abandoned" | "invalidated";
 
 export type WifiSessionStatus =
   | "pending"
+  | "authorizing"
   | "authorized"
   | "active"
-  | "expired"
+  | "paused"
   | "disconnected"
+  | "expired"
   | "failed";
 
 export type QuotaTransactionType = "grant" | "consume" | "refund" | "adjustment";
@@ -147,14 +149,14 @@ export interface DeviceInfo {
 export interface WifiSession {
   id: string;
   status: WifiSessionStatus;
-  startedAt: string;
-  expiresAt?: string;
+  startedAt?: string;
   endedAt?: string;
-  allocatedSeconds: number;
-  allocatedBytes: number;
-  consumedSeconds?: number;
+  allocatedBytes?: number;
   consumedBytes?: number;
-  networkSessionReference?: string;
+  authorizationState?: string;
+  adState?: string;
+  routerSessionReference?: string;
+  heartbeatExpiresAt?: string;
   disconnectReason?: string;
 }
 
@@ -190,28 +192,32 @@ export interface AppNotification {
 }
 
 // ===========================================
-// État de connexion (machine à états)
+// État de connexion (machine à états, orientée serveur)
 // ===========================================
 export type ConnectionState =
-  | "deconnected"
-  | "connecting"
-  | "connected"
-  | "ad_found"
-  | "ad_missing"
+  | "idle"
+  | "ad_loading"
+  | "ad_active"
+  | "authorizing_wifi"
+  | "wifi_active"
+  | "paused"
   | "quota_exhausted"
-  | "suspended"
-  | "network_error";
+  | "error"
+  | "disconnecting";
 
 export type InternetStatus = "active" | "cut" | "suspended";
 
+// Motifs ALIGNÉS sur la base (session-machine.ts côté serveur). Le
+// client ne fait que refléter ce que le serveur décide.
 export type DisconnectReason =
-  | "ad_closed"
-  | "ad_hidden"
-  | "quota_exhausted"
-  | "session_expired"
-  | "network_error"
-  | "user_disconnected"
-  | "suspended";
+  | "USER_PAUSED_AD"
+  | "APP_BACKGROUND"
+  | "USER_LOGOUT"
+  | "HEARTBEAT_TIMEOUT"
+  | "QUOTA_EXHAUSTED"
+  | "NETWORK_LOST"
+  | "ADMIN_DISCONNECT"
+  | "ROUTER_ERROR";
 
 export interface ConnectivityStatus {
   connected: boolean;

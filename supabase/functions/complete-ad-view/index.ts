@@ -100,3 +100,5 @@ type CompleteAdViewResultReason =
   | "invalid"
   | "too_early"
   | "expired";
+
+Deno.serve(completeAdView);

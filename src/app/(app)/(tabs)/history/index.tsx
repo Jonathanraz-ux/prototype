@@ -10,23 +10,25 @@ import GlassCard from "../../../../components/GlassCard";
 import type { ConnectionHistoryItem, DisconnectReason } from "../../../../types";
 
 const REASON_ICONS: Record<DisconnectReason, LucideIcon> = {
-  ad_closed: EyeOff,
-  ad_hidden: EyeOff,
-  quota_exhausted: AlertTriangle,
-  session_expired: Clock,
-  network_error: XCircle,
-  user_disconnected: Power,
-  suspended: AlertTriangle
+  USER_PAUSED_AD: Power,
+  APP_BACKGROUND: EyeOff,
+  USER_LOGOUT: Power,
+  HEARTBEAT_TIMEOUT: Clock,
+  QUOTA_EXHAUSTED: AlertTriangle,
+  NETWORK_LOST: XCircle,
+  ADMIN_DISCONNECT: Power,
+  ROUTER_ERROR: AlertTriangle
 };
 
 const REASON_COLORS: Record<DisconnectReason, string> = {
-  ad_closed: COLORS.warning,
-  ad_hidden: COLORS.warning,
-  quota_exhausted: COLORS.danger,
-  session_expired: COLORS.textMuted,
-  network_error: COLORS.danger,
-  user_disconnected: COLORS.success,
-  suspended: COLORS.warning
+  USER_PAUSED_AD: COLORS.success,
+  APP_BACKGROUND: COLORS.warning,
+  USER_LOGOUT: COLORS.textMuted,
+  HEARTBEAT_TIMEOUT: COLORS.warning,
+  QUOTA_EXHAUSTED: COLORS.danger,
+  NETWORK_LOST: COLORS.danger,
+  ADMIN_DISCONNECT: COLORS.danger,
+  ROUTER_ERROR: COLORS.danger
 };
 
 export default function HistoryScreen() {

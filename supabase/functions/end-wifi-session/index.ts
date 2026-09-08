@@ -1,11 +1,14 @@
 // ============================================================
 // end-wifi-session — Termine une session Wi-Fi de l'utilisateur.
 // Vérifie l'appartenance de la session puis délègue à la fonction
-// PostgreSQL atomique end_wifi_session (service_role).
+// PostgreSQL atomique end_network_session (service_role).
+// Motifs normalisés : USER_PAUSED_AD / APP_BACKGROUND / USER_LOGOUT
+// / NETWORK_LOST / QUOTA_EXHAUSTED / ...
 // ============================================================
 
 import { handleCors, ok, fail, methodNotAllowed } from "../_shared/http.ts";
 import { publicClient, serviceClient } from "../_shared/supabase.ts";
+import { normalizeReason } from "../_shared/session-machine.ts";
 import { sendPush } from "../_shared/push.ts";
 
 interface EndSessionBody {
@@ -22,6 +25,14 @@ export async function endWifiSession(req: Request): Promise<Response> {
   const token = auth.replace(/^Bearer\s+/i, "");
   if (!token) return fail("Authentification requise", 401, "unauthorized");
 
+  let body: EndSessionBody;
+  try {
+    body = await req.json();
+  } catch {
+    return fail("Corps de requête invalide");
+  }
+  if (!body.session_id) return fail("session_id requis", 400, "missing_session");
+
   const pub = publicClient();
   const {
     data: { user },
@@ -30,14 +41,6 @@ export async function endWifiSession(req: Request): Promise<Response> {
   if (userErr || !user) {
     return fail("Jeton invalide ou expiré", 401, "unauthorized");
   }
-
-  let body: EndSessionBody;
-  try {
-    body = await req.json();
-  } catch {
-    return fail("Corps de requête invalide");
-  }
-  if (!body.session_id) return fail("session_id requis", 400, "missing_session");
 
   // L'utilisateur ne peut terminer que sa propre session.
   const { data: session } = await pub
@@ -50,27 +53,22 @@ export async function endWifiSession(req: Request): Promise<Response> {
     return ok({ success: false });
   }
 
+  const reason = normalizeReason(body.reason ?? "USER_PAUSED_AD");
   const admin = serviceClient();
-  const { data, error } = await admin.rpc("end_wifi_session", {
+  const { data, error } = await admin.rpc("end_network_session", {
     p_session_id: body.session_id,
-    p_reason: body.reason ?? "user_disconnected",
+    p_reason: reason,
   });
 
   if (error) {
     return ok({ success: false });
   }
 
-  // Avertir l'utilisateur de la fin de sa session (notification interne + push).
-  if (data === true) {
-    const reason = body.reason ?? "user_disconnected";
-    const message =
-      reason === "quota_exceeded"
-        ? "Votre quota de données est épuisé. La session Wi-Fi a été interrompue."
-        : "Votre session Wi-Fi s'est terminée.";
+  if (data === true && reason === "QUOTA_EXHAUSTED") {
     await sendPush({
       user_id: user.id,
       title: "Session Wi-Fi terminée",
-      body: message,
+      body: "Votre quota de données est épuisé. La session Wi-Fi a été interrompue.",
       type: "quota",
       data: { session_id: body.session_id },
     });
@@ -78,3 +76,5 @@ export async function endWifiSession(req: Request): Promise<Response> {
 
   return ok({ success: data === true });
 }
+
+Deno.serve(endWifiSession);

@@ -5,65 +5,140 @@ import type { WifiSession, SessionUsage, ConnectionHistoryItem } from "../types"
 
 const TAG = "sessions";
 
-/**
- * Récupère le quota disponible de l'utilisateur courant, tel que
- * calculé côté serveur (somme des transactions).
- */
-export async function fetchUsage(): Promise<{
-  remainingSeconds: number;
-  remainingBytes: number;
-  available: boolean;
-}> {
-  const {
-    data: { user },
-  } = await getSupabase().auth.getUser();
-  if (!user) return { remainingSeconds: 0, remainingBytes: 0, available: false };
+// ————————————————————————————————————————————————————————————
+// Formes serveur restituées par les Edge Functions (migration 0008)
+// ————————————————————————————————————————————————————————————
+export interface ServerAllocation {
+  allocation_id?: string;
+  user_id?: string;
+  site_id?: string;
+  quota_bytes?: number;
+  consumed_bytes?: number;
+  remaining_bytes?: number;
+  status?: string;
+  exhausted_at?: string | null;
+}
 
-  const { data, error } = await getSupabase()
-    .rpc("get_user_quota", { p_user_id: user.id });
+export interface ServerSession {
+  session_id?: string;
+  site_id?: string;
+  router_id?: string | null;
+  status?: string;
+  ad_state?: string;
+  authorization_state?: string;
+  started_at?: string;
+  ended_at?: string | null;
+  last_heartbeat_at?: string | null;
+  heartbeat_expires_at?: string | null;
+  bytes_in?: number;
+  bytes_out?: number;
+  bytes_total?: number;
+  disconnect_reason?: string | null;
+  router_session_reference?: string | null;
+  device_observed_mac?: string | null;
+  device_observed_ip?: string | null;
+}
 
-  if (error || data === null) {
-    logger.warn(TAG, "get_user_quota impossible", error?.message);
-    return { remainingSeconds: 0, remainingBytes: 0, available: false };
-  }
-
-  const row = (Array.isArray(data) ? data[0] : data) as {
-    remaining_seconds?: number;
-    remaining_bytes?: number;
-  };
-  return {
-    remainingSeconds: row?.remaining_seconds ?? 0,
-    remainingBytes: row?.remaining_bytes ?? 0,
-    available: true,
-  };
+export interface QuotaStatusShape {
+  server_time?: string;
+  allocation?: ServerAllocation | null;
+  session?: ServerSession | null;
 }
 
 /**
- * Demande la création d'une session Wi-Fi via la Edge Function
- * 'request-wifi-session' (seule manière de créer une session authorized).
+ * État quota + session active — SOURCE DE VÉRITÉ côté serveur
+ * (Edge Function quota-status → public.get_quota_status). Les
+ * allocations persistantes ne se recalculent jamais côté client.
+ */
+export async function fetchQuotaStatus(
+  siteId?: string | null
+): Promise<QuotaStatusShape> {
+  const res = await callFunction<QuotaStatusShape>("quota-status", { site_id: siteId ?? null });
+  if (!res.ok) {
+    logger.warn(TAG, "quota-status échoué", res.error.code);
+    return {};
+  }
+  return res.data;
+}
+
+/**
+ * Demande une session Wi-Fi via la Edge Function 'request-wifi-session'.
+ * Le téléphone ne possède aucun secret : l'autorisation routeur est enfilée
+ * comme commande signée consommée par l'agent local.
  */
 export async function requestWifiSession(input: {
   siteId?: string;
   routerId?: string;
-  adViewId: string;
-}): Promise<{ ok: boolean; sessionId?: string; reason?: string }> {
-  const res = await callFunction<{ session_id?: string; reason?: string }>("request-wifi-session", {
+  sessionToken?: string;
+  deviceObservedMac?: string;
+  deviceObservedIp?: string;
+}): Promise<{
+  ok: boolean;
+  outcome?: string;
+  sessionId?: string;
+  status?: string;
+  authorizationState?: string;
+  reason?: string;
+}> {
+  const res = await callFunction<Record<string, unknown>>("request-wifi-session", {
     site_id: input.siteId,
-    router_id: input.routerId,
-    ad_view_id: input.adViewId,
+    router_id: input.routerId ?? null,
+    session_token: input.sessionToken,
+    device_observed_mac: input.deviceObservedMac ?? null,
+    device_observed_ip: input.deviceObservedIp ?? null,
   });
 
   if (!res.ok) {
     return { ok: false, reason: res.error.code };
   }
-  if (res.data.session_id) {
-    return { ok: true, sessionId: res.data.session_id };
-  }
-  return { ok: false, reason: res.data.reason ?? "unknown" };
+
+  const d = res.data;
+  const outcome = (d.outcome as string) ?? "unknown";
+  const createOrResume = outcome === "created" || outcome === "resume";
+  return {
+    ok: createOrResume,
+    outcome,
+    sessionId: (d.session_id as string) ?? undefined,
+    status: (d.status as string) ?? undefined,
+    authorizationState: (d.authorization_state as string) ?? undefined,
+    reason: createOrResume ? undefined : ((d.reason as string) ?? outcome),
+  };
 }
 
 /**
- * Récupère la session active (ou plus récente) de l'utilisateur.
+ * Battement publicitaire — le serveur décide seul de l'état de la session.
+ */
+export async function adHeartbeat(sessionId: string): Promise<{
+  outcome: string;
+  server_time?: string;
+  heartbeat_expires_at?: string;
+}> {
+  const res = await callFunction<{
+    outcome: string;
+    server_time?: string;
+    heartbeat_expires_at?: string;
+  }>("ad-heartbeat", { session_id: sessionId });
+  if (!res.ok) return { outcome: "heartbeat_failed" };
+  return res.data;
+}
+
+/**
+ * Termine manuellement la session de l'utilisateur via Edge Function.
+ * Motifs normalisés côté serveur (USER_PAUSED_AD par défaut).
+ */
+export async function endWifiSession(
+  sessionId: string,
+  reason: string = "USER_PAUSED_AD"
+): Promise<boolean> {
+  const res = await callFunction<{ success?: boolean }>("end-wifi-session", {
+    session_id: sessionId,
+    reason,
+  });
+  return res.ok && res.data.success !== false;
+}
+
+/**
+ * Récupère la session active (ou la plus récente) de l'utilisateur.
  */
 export async function getActiveSession(): Promise<WifiSession | null> {
   const {
@@ -75,24 +150,13 @@ export async function getActiveSession(): Promise<WifiSession | null> {
     .from("wifi_sessions")
     .select("*")
     .eq("user_id", user.id)
-    .in("status", ["pending", "authorized", "active"])
+    .in("status", ["pending", "authorizing", "authorized", "active", "paused"] as never)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (error || !data) return null;
-  return mapSessionRow(data);
-}
-
-/**
- * Termine manuellement la session de l'utilisateur via Edge Function.
- */
-export async function endWifiSession(sessionId: string): Promise<boolean> {
-  const res = await callFunction<{ success?: boolean }>("end-wifi-session", {
-    session_id: sessionId,
-    reason: "user_disconnected",
-  });
-  return res.ok && res.data.success !== false;
+  return mapSessionRow(data as unknown as Record<string, unknown>);
 }
 
 /**
@@ -113,41 +177,48 @@ export async function fetchHistory(): Promise<ConnectionHistoryItem[]> {
 
   if (error || !data) return [];
 
-  return data.map((row) => ({
-    id: row.id,
-    connectedAt: row.started_at,
-    disconnectedAt: row.ended_at ?? undefined,
-    durationMinutes: row.allocated_seconds ? Math.round(row.allocated_seconds / 60) : 0,
-    dataUsedMB: row.consumed_bytes ? Math.round(row.consumed_bytes / (1024 * 1024)) : undefined,
-    status: row.status === "expired" ? "expired" : row.status === "failed" ? "interrupted" : "completed",
-    disconnectReason: (row.disconnect_reason as ConnectionHistoryItem["disconnectReason"]) ?? undefined,
-  }));
+  return data.map((row) => {
+    const r = row as unknown as Record<string, unknown>;
+    const startedAt = (r.started_at as string) ?? undefined;
+    const endedAt = (r.ended_at as string) ?? undefined;
+    const durationMinutes =
+      startedAt && endedAt
+        ? Math.max(0, Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60000))
+        : 0;
+    return {
+      id: r.id as string,
+      connectedAt: startedAt ?? "",
+      disconnectedAt: endedAt,
+      durationMinutes,
+      dataUsedMB: (r.bytes_total as number) ? Math.round(((r.bytes_total as number) ?? 0) / (1024 * 1024)) : undefined,
+      status: r.status === "expired" ? "expired" : r.status === "failed" ? "interrupted" : "completed",
+      disconnectReason: (r.disconnect_reason as ConnectionHistoryItem["disconnectReason"]) ?? undefined,
+    };
+  });
 }
 
 /**
- * Récupère la consommation réelle de la session (si l'adaptateur réseau
- * la fournit). Sinon renvoie "indisponible".
+ * Consommation réelle d'une session (depuis l'adaptateur réseau).
+ * La SOURCE DE VÉRITÉ est désormais le routeur via l'agent local
+ * (coté server → quota-status) : cette lecture reste un recours.
  */
 export async function fetchSessionUsage(reference: string): Promise<SessionUsage> {
-  // Intégration réelle : interroger l'adaptateur réseau via une Edge
-  // function dédiée. Tant que le réseau n'est pas branché, on renvoie
-  // "indisponible" explicitement.
   void reference;
   return { consumedSeconds: 0, consumedBytes: 0, available: false };
 }
 
-function mapSessionRow(row: Record<string, unknown>): WifiSession {
+export function mapSessionRow(row: Record<string, unknown>): WifiSession {
   return {
     id: row.id as string,
     status: (row.status as WifiSession["status"]) ?? "pending",
-    startedAt: (row.started_at as string) ?? new Date().toISOString(),
-    expiresAt: (row.expires_at as string) ?? undefined,
+    startedAt: (row.started_at as string) ?? undefined,
     endedAt: (row.ended_at as string) ?? undefined,
-    allocatedSeconds: (row.allocated_seconds as number) ?? 0,
     allocatedBytes: (row.allocated_bytes as number) ?? 0,
-    consumedSeconds: row.consumed_seconds as number | undefined,
-    consumedBytes: row.consumed_bytes as number | undefined,
-    networkSessionReference: (row.network_session_reference as string) ?? undefined,
+    consumedBytes: (row.bytes_total as number) ?? 0,
+    authorizationState: (row.authorization_state as string) ?? undefined,
+    adState: (row.ad_state as string) ?? undefined,
+    routerSessionReference: (row.router_session_reference as string) ?? undefined,
+    heartbeatExpiresAt: (row.heartbeat_expires_at as string) ?? undefined,
     disconnectReason: (row.disconnect_reason as string) ?? undefined,
   };
 }

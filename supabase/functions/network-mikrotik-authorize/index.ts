@@ -48,3 +48,5 @@ export async function networkMikrotikAuthorize(req: Request): Promise<Response> 
 
   return ok({ success: true, reference });
 }
+
+Deno.serve(networkMikrotikAuthorize);

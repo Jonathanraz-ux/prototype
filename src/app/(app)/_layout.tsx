@@ -10,6 +10,7 @@ export default function AppLayout() {
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="profile/edit" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="admin" options={{ animation: "slide_from_right" }} />
     </Stack>
   );
 }
