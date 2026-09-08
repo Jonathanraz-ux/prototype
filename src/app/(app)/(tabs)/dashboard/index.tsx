@@ -10,6 +10,8 @@ import { Play, Power, AlertTriangle, ServerCog } from "lucide-react-native";
 import HeroAdCard from "../../../../components/HeroAdCard";
 import ConnectionStatusCard from "../../../../components/ConnectionStatusCard";
 import RefreshButton from "../../../../components/RefreshButton";
+import AndroidVpnDemoCard from "../../../../components/AndroidVpnDemoCard";
+import { ScrollView } from "react-native";
 
 export default function DashboardScreen() {
   const { user, isAdmin, isSiteManager } = useAuth();
@@ -25,6 +27,7 @@ export default function DashboardScreen() {
     currentAd,
     networkHealth,
     lastSyncAt,
+    networkMode,
   } = useConnection();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -155,47 +158,54 @@ export default function DashboardScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
-      <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title} numberOfLines={1}>
-              Bonjour <Text style={{ color: COLORS.accentSoft }}>{user?.firstName ?? ""}</Text>
-            </Text>
-            <Text style={styles.subtitle}>Connexion financée par la publicité</Text>
-            {state !== "idle" && <Text style={styles.subtitle}>{stateLabel}</Text>}
-            {reasonLabel && <Text style={styles.reason}>{reasonLabel}</Text>}
+      <ScrollView
+        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 110 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View style={{ gap: 14, opacity: fadeAnim }}>
+          <View style={styles.header}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title} numberOfLines={1}>
+                Bonjour <Text style={{ color: COLORS.accentSoft }}>{user?.firstName ?? ""}</Text>
+              </Text>
+              <Text style={styles.subtitle}>Connexion financée par la publicité</Text>
+              {state !== "idle" && <Text style={styles.subtitle}>{stateLabel}</Text>}
+              {reasonLabel && <Text style={styles.reason}>{reasonLabel}</Text>}
+            </View>
+            <RefreshButton refreshing={isRefreshing} onPress={handleRefresh} />
           </View>
-          <RefreshButton refreshing={isRefreshing} onPress={handleRefresh} />
-        </View>
 
-        <View style={{ flex: 1 }}>
-          <HeroAdCard />
-        </View>
+          <AndroidVpnDemoCard />
 
-        <ConnectionStatusCard
-          connected={isActive}
-          connecting={isConnecting}
-          percent={percent}
-          timeMinutes={usage.remainingTimeMinutes}
-          quotaMB={usage.remainingQuotaMB}
-          consumedMB={usage.todayConsumptionMB}
-          totalQuotaMB={usage.totalQuotaMB}
-          networkHealth={networkHealth}
-          lastSyncAt={lastSyncAt}
-        />
+          <View style={{ height: 260 }}>
+            <HeroAdCard />
+          </View>
 
-        {renderAction()}
+          <ConnectionStatusCard
+            connected={isActive}
+            connecting={isConnecting}
+            percent={percent}
+            timeMinutes={usage.remainingTimeMinutes}
+            quotaMB={usage.remainingQuotaMB}
+            consumedMB={usage.todayConsumptionMB}
+            totalQuotaMB={usage.totalQuotaMB}
+            networkHealth={networkMode === "android_vpn_demo" ? "READY" : networkHealth}
+            lastSyncAt={lastSyncAt}
+          />
 
-        {(isAdmin || isSiteManager) && (
-          <Pressable
-            onPress={() => router.push("/(app)/admin" as never)}
-            style={({ pressed }) => [styles.adminLink, { opacity: pressed ? 0.7 : 1 }]}
-          >
-            <ServerCog color={COLORS.textSecondary} size={16} />
-            <Text style={styles.adminLinkText}>Espace administrateur</Text>
-          </Pressable>
-        )}
-      </Animated.View>
+          {renderAction()}
+
+          {(isAdmin || isSiteManager) && (
+            <Pressable
+              onPress={() => router.push("/(app)/admin" as never)}
+              style={({ pressed }) => [styles.adminLink, { opacity: pressed ? 0.7 : 1 }]}
+            >
+              <ServerCog color={COLORS.textSecondary} size={16} />
+              <Text style={styles.adminLinkText}>Espace administrateur</Text>
+            </Pressable>
+          )}
+        </Animated.View>
+      </ScrollView>
     </View>
   );
 }

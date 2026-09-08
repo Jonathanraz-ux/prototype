@@ -10,6 +10,7 @@ const envSchema = z.object({
   EXPO_PUBLIC_SUPPORT_PHONE: z.string().optional(),
   EXPO_PUBLIC_SUPPORT_EMAIL: z.string().email().optional(),
   EXPO_PUBLIC_DEFAULT_SITE_ID: z.string().uuid().optional(),
+  EXPO_PUBLIC_NETWORK_MODE: z.enum(["mikrotik", "android_vpn_demo", "mock"]).default("mikrotik"),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -29,6 +30,7 @@ export function getConfig(): EnvConfig {
     EXPO_PUBLIC_SUPPORT_PHONE: process.env.EXPO_PUBLIC_SUPPORT_PHONE ?? "",
     EXPO_PUBLIC_SUPPORT_EMAIL: process.env.EXPO_PUBLIC_SUPPORT_EMAIL ?? "",
     EXPO_PUBLIC_DEFAULT_SITE_ID: process.env.EXPO_PUBLIC_DEFAULT_SITE_ID ?? "",
+    EXPO_PUBLIC_NETWORK_MODE: process.env.EXPO_PUBLIC_NETWORK_MODE ?? "mikrotik",
   };
 
   const result = envSchema.safeParse(raw);
@@ -61,4 +63,8 @@ export function isProduction(): boolean {
 
 export function isDevModeEnabled(): boolean {
   return isDevelopment() && __DEV__;
+}
+
+export function isAndroidVpnDemo(): boolean {
+  return getConfig().EXPO_PUBLIC_NETWORK_MODE === "android_vpn_demo";
 }

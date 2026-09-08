@@ -222,3 +222,136 @@ export function mapSessionRow(row: Record<string, unknown>): WifiSession {
     disconnectReason: (row.disconnect_reason as string) ?? undefined,
   };
 }
+
+/**
+ * Demande une session Wi-Fi en mode démonstration autonome Android.
+ * Appelle request_demo_wifi_session dans Supabase (aucun routeur physique requis).
+ */
+export async function requestDemoWifiSession(input: {
+  siteId?: string;
+  sessionToken?: string;
+}): Promise<{
+  ok: boolean;
+  outcome?: string;
+  sessionId?: string;
+  status?: string;
+  authorizationState?: string;
+  routerSessionReference?: string;
+  heartbeatExpiresAt?: string;
+  reason?: string;
+}> {
+  const supabase = getSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, reason: "unauthorized" };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("organization_id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!profile?.organization_id) return { ok: false, reason: "no_organization" };
+
+  const { data, error } = await (supabase.rpc as any)("request_demo_wifi_session", {
+    p_user_id: user.id,
+    p_organization_id: profile.organization_id,
+    p_site_id: input.siteId ?? null,
+    p_session_token: input.sessionToken ?? "demo-token",
+  });
+
+  if (error || !data) {
+    logger.error(TAG, "request_demo_wifi_session rpc failed", error);
+    return { ok: false, reason: error?.message ?? "rpc_error" };
+  }
+
+  const d = data as Record<string, unknown>;
+  const outcome = (d.outcome as string) ?? "unknown";
+  const createOrResume = outcome === "created" || outcome === "resume";
+  return {
+    ok: createOrResume,
+    outcome,
+    sessionId: (d.session_id as string) ?? undefined,
+    status: (d.status as string) ?? undefined,
+    authorizationState: (d.authorization_state as string) ?? undefined,
+    routerSessionReference: (d.router_session_reference as string) ?? undefined,
+    heartbeatExpiresAt: (d.heartbeat_expires_at as string) ?? undefined,
+    reason: createOrResume ? undefined : ((d.reason as string) ?? outcome),
+  };
+}
+
+/**
+ * Consommation simulée de quota pour les tests de démonstration.
+ * Idempotente, atomique, bornée au quota restant.
+ */
+export async function simulateDemoConsumption(bytesToConsume: number): Promise<{
+  ok: boolean;
+  consumedBytes?: number;
+  remainingBytes?: number;
+  quotaBytes?: number;
+  exhausted?: boolean;
+  reason?: string;
+}> {
+  const supabase = getSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, reason: "unauthorized" };
+
+  const idempotencyKey = `demo_sim_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const { data, error } = await (supabase.rpc as any)("demo_consume_quota", {
+    p_user_id: user.id,
+    p_bytes: bytesToConsume,
+    p_idempotency_key: idempotencyKey,
+  });
+
+  if (error || !data) {
+    logger.error(TAG, "demo_consume_quota error", error);
+    return { ok: false, reason: error?.message ?? "rpc_error" };
+  }
+
+  const d = data as Record<string, unknown>;
+  return {
+    ok: Boolean(d.ok),
+    consumedBytes: Number(d.consumed_bytes ?? 0),
+    remainingBytes: Number(d.remaining_bytes ?? 0),
+    quotaBytes: Number(d.quota_bytes ?? 0),
+    exhausted: Boolean(d.exhausted),
+    reason: (d.reason as string) ?? undefined,
+  };
+}
+
+/**
+ * Réinitialisation explicite du quota de démonstration (5 Go).
+ */
+export async function resetDemoQuota(): Promise<{
+  ok: boolean;
+  remainingBytes?: number;
+  quotaBytes?: number;
+  reason?: string;
+}> {
+  const supabase = getSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, reason: "unauthorized" };
+
+  const { data, error } = await (supabase.rpc as any)("demo_reset_quota", {
+    p_user_id: user.id,
+    p_quota_bytes: 5368709120, // 5 GiB
+  });
+
+  if (error || !data) {
+    logger.error(TAG, "demo_reset_quota error", error);
+    return { ok: false, reason: error?.message ?? "rpc_error" };
+  }
+
+  const d = data as Record<string, unknown>;
+  return {
+    ok: Boolean(d.ok),
+    remainingBytes: Number(d.remaining_bytes ?? 0),
+    quotaBytes: Number(d.quota_bytes ?? 0),
+    reason: (d.reason as string) ?? undefined,
+  };
+}

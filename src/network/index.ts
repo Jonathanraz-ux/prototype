@@ -4,28 +4,39 @@ import type { NetworkAccessAdapter, NetworkHealth } from "./NetworkAccessAdapter
 import { DevelopmentNetworkAdapter } from "./DevelopmentNetworkAdapter";
 import { RadiusNetworkAdapter } from "./RadiusNetworkAdapter";
 import { MikrotikNetworkAdapter } from "./MikrotikNetworkAdapter";
+import { AndroidVpnDemoAdapter } from "./AndroidVpnDemoAdapter";
+
+export { AndroidVpnDemoAdapter } from "./AndroidVpnDemoAdapter";
+export { DevelopmentNetworkAdapter } from "./DevelopmentNetworkAdapter";
+export { MikrotikNetworkAdapter } from "./MikrotikNetworkAdapter";
+export { RadiusNetworkAdapter } from "./RadiusNetworkAdapter";
+export * from "./NetworkAccessAdapter";
 
 const TAG = "net:factory";
 
+export type NetworkMode = "mikrotik" | "android_vpn_demo" | "mock" | "radius" | "not_configured";
+
 /**
- * Résout l'adaptateur réseau selon le type configuré.
+ * Résout l'adaptateur réseau selon le mode demandé ou configuré.
  *
- * - development : uniquement en dev (lévé en production)
- * - radius : pilote FreeRADIUS côté serveur
- * - mikrotik : pilote MikroTik côté serveur
- *
- * En pilote/production sans configuration, on instancie un adaptateur
- * qui renverra systématiquement l'état explicite NOT_CONFIGURED.
+ * - android_vpn_demo : contrôle VPN local Android autonome (sans routeur physique)
+ * - mikrotik          : pilote MikroTik via commandes serveur et agent local
+ * - mock / development : mock local développement
+ * - radius            : pilote FreeRADIUS
+ * - not_configured    : adaptateur vide
  */
-export function resolveNetworkAdapter(): NetworkAccessAdapter {
-  const adapterType = process.env.NETWORK_ADAPTER_TYPE ?? (isDevelopment() ? "development" : "not_configured");
+export function resolveNetworkAdapter(overrideMode?: string): NetworkAccessAdapter {
+  const adapterType =
+    overrideMode ??
+    process.env.EXPO_PUBLIC_NETWORK_MODE ??
+    process.env.NETWORK_ADAPTER_TYPE ??
+    (isDevelopment() ? "development" : "not_configured");
 
   switch (adapterType) {
+    case "android_vpn_demo":
+      return new AndroidVpnDemoAdapter();
+    case "mock":
     case "development":
-      if (!isDevelopment()) {
-        logger.error(TAG, "Adaptateur development interdit hors développement.");
-        return new UnconfiguredAdapter();
-      }
       return new DevelopmentNetworkAdapter();
     case "radius":
       return new RadiusNetworkAdapter({ enabled: true });
