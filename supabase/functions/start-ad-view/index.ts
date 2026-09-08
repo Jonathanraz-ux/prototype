@@ -22,7 +22,7 @@ export async function startAdView(req: Request): Promise<Response> {
   if (!token) return fail("Authentification requise", 401, "unauthorized");
 
   // Récupère l'utilisateur authentifié (clé publishable, vérification JWT).
-  const supabase = publicClient();
+  const supabase = publicClient(token);
   const {
     data: { user },
     error: userErr,

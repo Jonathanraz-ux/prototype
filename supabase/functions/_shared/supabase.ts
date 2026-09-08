@@ -47,9 +47,18 @@ export function serviceClient(): SupabaseClient {
   return _service;
 }
 
-/** Client utilisant la clé publishable/anon (privilèges RLS normaux). */
-export function publicClient(): SupabaseClient {
+/** Client utilisant la clé publishable/anon (privilèges RLS normaux).
+ *  Si un JWT est fourni, il est attaché comme jeton d'authentification
+ *  globaux : les requêtes PostgREST s'exécutent alors sous l'identité
+ *  de l'utilisateur (auth.uid() résolu par RLS). */
+export function publicClient(token?: string): SupabaseClient {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const key = resolvePublishableKeys();
-  return createClient(url, key);
+  return createClient(
+    url,
+    key,
+    token
+      ? { global: { headers: { Authorization: `Bearer ${token}` } } }
+      : undefined
+  );
 }

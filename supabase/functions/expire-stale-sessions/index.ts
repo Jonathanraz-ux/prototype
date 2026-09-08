@@ -43,7 +43,18 @@ export async function expireStaleSessions(req: Request): Promise<Response> {
     return fail(error.message, 500, "expire_failed");
   }
 
-  return ok({ expired: data ?? 0 });
+  const crons = await admin.rpc("expire_stale_agents", {
+    p_seconds: intFromEnv("WIFI_AGENT_HEARTBEAT_SECONDS", 120),
+  });
+
+  if (crons.error) {
+    return fail(crons.error.message, 500, "expire_agents_failed");
+  }
+
+  return ok({
+    expired_sessions: data ?? 0,
+    expired_agents: crons.data ?? 0,
+  });
 }
 
 Deno.serve(expireStaleSessions);

@@ -30,7 +30,7 @@ export async function adminResetAllocation(req: Request): Promise<Response> {
   const token = auth.replace(/^Bearer\s+/i, "");
   if (!token) return fail("Authentification requise", 401, "unauthorized");
 
-  const pub = publicClient();
+  const pub = publicClient(token);
   const {
     data: { user },
     error: userErr,

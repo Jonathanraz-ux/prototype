@@ -23,7 +23,7 @@ export async function completeAdView(req: Request): Promise<Response> {
   if (!token) return fail("Authentification requise", 401, "unauthorized");
 
   // Vérifie l'utilisateur.
-  const pub = publicClient();
+  const pub = publicClient(token);
   const {
     data: { user },
     error: userErr,

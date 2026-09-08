@@ -38,7 +38,7 @@ export async function requestWifiSession(req: Request): Promise<Response> {
   if (!body.site_id) return fail("site_id requis", 400, "missing_site");
   if (!body.session_token) return fail("session_token requis", 400, "missing_session_token");
 
-  const pub = publicClient();
+  const pub = publicClient(token);
   const {
     data: { user },
     error: userErr,

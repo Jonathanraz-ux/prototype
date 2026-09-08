@@ -10,6 +10,13 @@ jamais générer d'APK.
 > Edge Functions déployées, agent configuré, application lancée en dev via
 > `npx expo start`).
 
+> **État réel au 2026-09-08** : le backend distant est préparé et les corrections
+> (contexte auth des Edge Functions, gateway JWT des fonctions agent, casts enum,
+> expiration heartbeat) sont appliquées **à la base distante ET dans les fichiers
+> de migration sources**. Le MikroTik physique et l'agent réel **ne sont pas
+> connectés** à ce jour : l'agent (`offline`) et le routeur (`offline`) sont donc
+> au repos. Rien n'a été poussé vers Git et aucun APK n'a été généré.
+
 ---
 
 ## 1. Avant de partir (sans le routeur)
@@ -28,6 +35,8 @@ Ces étapes peuvent être faites chez soi / au bureau, sans matériel.
    - `NETWORK_ADAPTER_TYPE=mock` si l'on veut répéter sans équipement, sinon
      `mikrotik`,
    - `MIKROTIK_HOST` / `MIKROTIK_USERNAME` / `MIKROTIK_PASSWORD`.
+   > Dans `agent/.env`, `MIKROTIK_PASSWORD` vaut encore `changez-moi` (placeholder) :
+   > **le mot de passe réel du routeur doit être saisi par le client avant le test**.
 4. **Vérifier les tests** : `npm test`, `npm run test:functions`, et les tests
    Node de `agent/` passent au vert.
 5. **Vérifier l'agent en mock** (optionnel, hors routeur) : lancer l'agent avec
@@ -142,6 +151,12 @@ Sur le dashboard, confirmer que tous les états s'affichent correctement :
 3. **Expiration de session** : agent coupé pendant une session active → après la
    grâce (25 s), `expire_stale_network_sessions` déconnecte la session
    (`HEARTBEAT_TIMEOUT`).
+4. **Obsolescence de l'agent / du routeur** : sans heartbeat valide pendant le
+   délai (120 s par défaut), `expire_stale_agents` bascule l'agent (`online` →)
+   et le routeur (`active` →) à `offline`. Un ancien heartbeat ne laisse donc
+   **jamais** le routeur `active` indéfiniment. Ce contrôle est délégué par la
+   cron `expire-stale-sessions`. Sur le terrain, seul l'agent réellement connecté
+   au hAP ac² (heartbeat `router_ok=true`) maintient le routeur `active`.
 
 ---
 

@@ -401,6 +401,28 @@ MIKROTIK_USERNAME = "env(MIKROTIK_USERNAME)"
 MIKROTIK_PASSWORD = "env(MIKROTIK_PASSWORD)"
 ADVERTISEMENT_PROOF_SECRET = "env(ADVERTISEMENT_PROOF_SECRET)"
 
+# Les fonctions agent-* sont appelées par l'agent local avec son token opaque
+# (jamais un JWT utilisateur). Elles s'authentifient elles-mêmes via
+# resolveAgentByToken (comparaison du hash sha256 en base) : la vérification
+# JWT de la passerelle doit donc être désactivée pour ces fonctions.
+[functions.agent-ping]
+verify_jwt = false
+
+[functions.agent-command-fetch]
+verify_jwt = false
+
+[functions.agent-command-result]
+verify_jwt = false
+
+[functions.agent-collect]
+verify_jwt = false
+
+[functions.agent-expire]
+verify_jwt = false
+
+[functions.agent-reconcile]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

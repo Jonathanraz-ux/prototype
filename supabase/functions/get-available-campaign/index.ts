@@ -15,7 +15,7 @@ export async function getAvailableCampaign(req: Request): Promise<Response> {
   const token = auth.replace(/^Bearer\s+/i, "");
   if (!token) return fail("Authentification requise", 401, "unauthorized");
 
-  const supabase = publicClient();
+  const supabase = publicClient(token);
   const {
     data: { user },
     error: userErr,

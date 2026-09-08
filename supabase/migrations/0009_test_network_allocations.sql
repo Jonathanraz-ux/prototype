@@ -434,8 +434,6 @@ as $$
 declare
   v_alloc record;
   v_session record;
-  v_site_id uuid := coalesce(p_site_id,
-    (select site_id from public.devices where user_id = p_user_id order by last_seen_at desc nulls last limit 1));
 begin
   perform public.internal_enforce_service_role();
 
@@ -499,7 +497,6 @@ declare
   v_sess record;
   v_sig text;
   v_due timestamptz;
-  v_updated integer;
 begin
   perform public.internal_enforce_service_role();
 
@@ -517,8 +514,7 @@ begin
                           then 'paused' else 'ended' end,
           authorization_state = 'revoked',
           updated_at = now()
-      where id = p_session_id
-      returning status into v_updated;
+      where id = p_session_id;
 
     perform public.add_network_event(
       v_sess.organization_id, v_sess.site_id, v_sess.user_id, v_sess.id,
@@ -1077,7 +1073,7 @@ begin
   perform public.internal_enforce_service_role();
 
   update public.local_agents
-    set status = case when p_status = 'online' then 'online' else 'offline' end,
+    set status = case when p_status = 'online' then 'online' else 'offline' end::agent_status,
         last_seen_at = now(),
         updated_at = now()
     where id = p_agent_id;
@@ -1091,7 +1087,7 @@ begin
 
   if v_router is not null then
     update public.routers
-      set status = case when coalesce(p_router_ok, false) then 'active' else 'offline' end,
+      set status = case when coalesce(p_router_ok, false) then 'active' else 'offline' end::router_status,
           last_seen_at = now(),
           updated_at = now()
       where id = v_router;

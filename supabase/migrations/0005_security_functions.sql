@@ -93,9 +93,9 @@ begin
     seconds_delta, bytes_delta, reason
   )
   select
-    organization_id,
-    user_id,
-    id,
+    av.organization_id,
+    av.user_id,
+    av.id,
     'grant',
     case when c.reward_type in ('minutes', 'mixed')
          then c.reward_value * 60
@@ -103,7 +103,7 @@ begin
     case when c.reward_type in ('megabytes', 'mixed')
          then c.reward_value * 1024 * 1024
          else 0 end,
-    'ad_reward:' || id::text
+    'ad_reward:' || av.id::text
   from public.ad_views av
   join public.ad_campaigns c on c.id = av.campaign_id
   where av.id = p_view_id;
@@ -237,6 +237,47 @@ begin
 end;
 $$;
 
+-- ------------------------------------------------------------
+-- FONCTION : expirer l'agent local et le routeur faute de
+-- heartbeat valide reçu dans le délai configuré.
+-- Appelée périodiquement par une Edge Function cron.
+-- Un ancien heartbeat ne doit pas laisser l'agent/le routeur
+-- "active" indéfiniment : seul un agent réellement connecté au
+-- routeur (router_ok=true) peut maintenir "active".
+-- ------------------------------------------------------------
+create or replace function public.expire_stale_agents(
+  p_seconds integer default 120
+)
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_updated integer;
+begin
+  update public.local_agents
+    set status = 'offline',
+        updated_at = now()
+  where status = 'online'
+    and (last_seen_at is null
+         or last_seen_at < now() - make_interval(secs => p_seconds));
+
+  get diagnostics v_updated = row_count;
+
+  update public.routers
+    set status = 'offline',
+        updated_at = now()
+  where status = 'active'
+    and (last_seen_at is null
+         or last_seen_at < now() - make_interval(secs => p_seconds));
+
+  return v_updated;
+end;
+$$;
+
+grant execute on function public.expire_stale_agents(integer) to service_role;
 -- ------------------------------------------------------------
 -- FONCTION : forcer une seule connexion par appareil (option)
 -- Retourne vrai si le device est bloqué.

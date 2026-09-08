@@ -33,7 +33,7 @@ export async function endWifiSession(req: Request): Promise<Response> {
   }
   if (!body.session_id) return fail("session_id requis", 400, "missing_session");
 
-  const pub = publicClient();
+  const pub = publicClient(token);
   const {
     data: { user },
     error: userErr,
