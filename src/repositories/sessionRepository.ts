@@ -1,39 +1,16 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getSupabase } from "../lib/supabase";
 import { callFunction } from "../lib/functions";
 import { logger } from "../lib/logger";
+import { DEMO_QUOTA_BYTES } from "../lib/sessionControl";
 import type { WifiSession, SessionUsage, ConnectionHistoryItem } from "../types";
 
 const TAG = "sessions";
-const DEMO_QUOTA_STORAGE_KEY = "@wifizone/demo_quota_state";
-const DEMO_TOTAL_QUOTA_BYTES = 5368709120; // 5 GiB
 
-interface DemoQuotaState {
-  quotaBytes: number;
-  consumedBytes: number;
-  activeSessionId?: string;
-  sessionStartedAt?: string;
-}
-
-export async function getLocalDemoQuotaState(): Promise<DemoQuotaState> {
-  const raw = await AsyncStorage.getItem(DEMO_QUOTA_STORAGE_KEY);
-  if (raw) {
-    try {
-      return JSON.parse(raw);
-    } catch {}
-  }
-  const initial: DemoQuotaState = {
-    quotaBytes: DEMO_TOTAL_QUOTA_BYTES,
-    consumedBytes: 0,
-  };
-  await AsyncStorage.setItem(DEMO_QUOTA_STORAGE_KEY, JSON.stringify(initial));
-  return initial;
-}
-
-export async function saveLocalDemoQuotaState(st: DemoQuotaState): Promise<void> {
-  await AsyncStorage.setItem(DEMO_QUOTA_STORAGE_KEY, JSON.stringify(st));
-}
-
+// NOTE — Quota : la source de vérité est le SERVEUR (table allocations +
+// allocations_status) et le RÉSEAU (compteurs routeur/MikroTik). Aucun
+// état de quota n'est persisté ni consommé localement : le client relit
+// toujours quota-status. DEMO_QUOTA_BYTES (5 GiB, octets explicites) est
+// le montant harmonisé fourni au RPC serveur de réinitialisation.
 // ————————————————————————————————————————————————————————————
 // Formes serveur restituées par les Edge Functions (migration 0008)
 // ————————————————————————————————————————————————————————————
@@ -391,7 +368,7 @@ export async function resetDemoQuota(): Promise<{
 
   const { data, error } = await (supabase.rpc as any)("demo_reset_quota", {
     p_user_id: user.id,
-    p_quota_bytes: 5368709120, // 5 GiB
+    p_quota_bytes: DEMO_QUOTA_BYTES, // 5 GiB, octets explicites
   });
 
   if (error || !data) {

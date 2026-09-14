@@ -134,6 +134,11 @@ export interface UsageStats {
   todayConsumptionMB: number;
   downloadSpeedKbps?: number;
   uploadSpeedKbps?: number;
+  // Unité SERVEUR/RÉSEAU : octets (relation 1:1 avec les compteurs
+  // MikroTik). Les champs « MB » ci-dessus sont l'affichage dérivé.
+  totalBytes?: number;
+  remainingBytes?: number;
+  consumedBytes?: number;
 }
 
 // ===========================================
