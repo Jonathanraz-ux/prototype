@@ -15,6 +15,16 @@ export type NetworkHealth =
   | "AUTHENTICATION_FAILED"
   | "ERROR";
 
+/**
+ * Distingue un fournisseur RÉEL (pilote un équipement réseau : MikroTik,
+ * RADIUS) d'un fournisseur de SIMULATION (VPN local Android, mock de
+ * développement) et d'aucun fournisseur configuré.
+ *
+ * L'UI s'appuie sur ce drapeau pour ne JAMAIS présenter une simulation
+ * comme un accès réseau réel (règle CONSIGNES_PROJET.md §2.5).
+ */
+export type NetworkProviderKind = "live" | "simulated" | "unconfigured";
+
 export interface AuthorizeSessionInput {
   networkSessionReference?: string;
   username: string;
@@ -44,6 +54,8 @@ export interface SessionUsage {
 
 export interface NetworkAccessAdapter {
   readonly name: string;
+  /** "live" = équipement réel, "simulated" = simulation locale, "unconfigured". */
+  readonly providerKind: NetworkProviderKind;
   healthCheck(): Promise<NetworkHealth>;
   authorizeSession(input: AuthorizeSessionInput): Promise<AuthorizeSessionResult>;
   getSessionUsage(reference: string): Promise<SessionUsage>;

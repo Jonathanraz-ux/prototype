@@ -27,6 +27,8 @@ const TAG = "net:radius";
 
 export class RadiusNetworkAdapter implements NetworkAccessAdapter {
   readonly name = "radius";
+  /** Fournisseur RÉEL (si configuré) — pilote FreeRADIUS via serveur. */
+  readonly providerKind = "live" as const;
 
   // Pré-validé au démarrage du serveur. On ne stocke jamais le secret ici.
   private readonly endpointName = {

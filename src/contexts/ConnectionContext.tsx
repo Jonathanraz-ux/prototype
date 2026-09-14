@@ -35,7 +35,8 @@ import {
 } from "../repositories/adRepository";
 import type { AdCampaign } from "../types";
 import { registerDevice } from "../repositories/deviceRepository";
-import { resolveNetworkAdapter, type NetworkMode } from "../network";
+import { resolveNetworkAdapter, type NetworkMode, type NetworkProviderKind } from "../network";
+import { waitForMikrotikAuthorization } from "../lib/mikrotikAuth";
 import { getConfig } from "../lib/config";
 import {
   watchedSecondsFromDurationMillis,
@@ -92,6 +93,7 @@ export interface ConnectionContextValue {
   adError: string | null;
   lastError: string | null;
   networkHealth: string;
+  networkProviderKind: NetworkProviderKind;
   currentAd: AdCampaign | null;
   lastSyncAt: string | null;
   networkMode: NetworkMode;
@@ -110,10 +112,6 @@ export interface ConnectionContextValue {
 }
 
 const ConnectionContext = createContext<ConnectionContextValue | undefined>(undefined);
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export function allocationToUsage(a?: ServerAllocation | null): UsageStats {
   const quotaBytes = a?.quota_bytes ?? 0;
@@ -992,21 +990,20 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     siteId?: string,
     gen?: number
   ): Promise<{ ok: boolean; exhausted?: boolean; interrupted?: boolean }> {
-    const deadline = Date.now() + AUTHORIZE_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (gen !== undefined && !epochGuard.isCurrent(gen)) return { ok: false, interrupted: true };
-      const st = await fetchQuotaStatus(siteId ?? null);
-      if (disposedRef.current) return { ok: false };
-      if (gen !== undefined && !epochGuard.isCurrent(gen)) return { ok: false, interrupted: true };
-      refreshUsageFrom(st);
-      setActiveSession(serverSessionToWifi(st.session));
-      const signal = signalFromServer(st.session);
-      if (signal.mode === "active") return { ok: true };
-      if (signal.mode === "quota_exhausted") return { ok: false, exhausted: true };
-      if (signal.mode === "closed") return { ok: false };
-      await delay(1200);
-    }
-    return { ok: false };
+    const result = await waitForMikrotikAuthorization({
+      fetchStatus: () => fetchQuotaStatus(siteId ?? null),
+      timeoutMs: AUTHORIZE_TIMEOUT_MS,
+      isCancelled: () => (gen !== undefined && !epochGuard.isCurrent(gen)) || disposedRef.current,
+      onPoll: (st) => {
+        refreshUsageFrom(st);
+        setActiveSession(serverSessionToWifi(st.session));
+      },
+    });
+    return {
+      ok: result.ok,
+      exhausted: result.signal?.mode === "quota_exhausted",
+      interrupted: result.interrupted,
+    };
   }
 
   // ————————————————————————————————————————————————————————
@@ -1119,6 +1116,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       adError,
       lastError,
       networkHealth,
+      networkProviderKind: networkAdapter.providerKind,
       currentAd,
       lastSyncAt,
       networkMode,
@@ -1149,6 +1147,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       adError,
       lastError,
       networkHealth,
+      networkAdapter,
       currentAd,
       lastSyncAt,
       networkMode,

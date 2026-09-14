@@ -21,6 +21,8 @@ const TAG = "net:android-vpn";
  */
 export class AndroidVpnDemoAdapter implements NetworkAccessAdapter {
   readonly name = "android_vpn_demo";
+  /** Adaptateur de SIMULATION : contrôle VPN local Android, pas de routeur réel. */
+  readonly providerKind = "simulated" as const;
 
   async healthCheck(): Promise<NetworkHealth> {
     if (!vpnBlocker.isAvailable()) {

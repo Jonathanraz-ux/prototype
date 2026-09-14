@@ -1,4 +1,12 @@
 import { logger } from "../lib/logger";
+import { waitForMikrotikAuthorization } from "../lib/mikrotikAuth";
+import {
+  requestWifiSession,
+  endWifiSession,
+  fetchQuotaStatus,
+} from "../repositories/sessionRepository";
+import { quotaConsumedBytes } from "../lib/sessionControl";
+import { getConfig } from "../lib/config";
 import { callFunction } from "../lib/functions";
 import type {
   NetworkAccessAdapter,
@@ -11,22 +19,42 @@ import type {
 const TAG = "net:mikrotik";
 
 /**
- * MikrotikNetworkAdapter
- * ----------------------
- * Pilote l'accès réseau via un routeur MikroTik (API RouterOS).
- *
- * Le téléphone n'embarque AUCUN identifiant administrateur du routeur :
- * il appelle la Edge Function 'network-mikrotik-authorize' qui, côté
- * serveur, contacte le routeur via MIKROTIK_HOST / USERNAME / PASSWORD
- * (variables serveur uniquement).
- *
- * Structuré avec validation de config, timeouts, retries limités,
- * idempotence et journaux sans secrets. Ne prétend jamais une
- * connexion réussie sans équipement réel.
+ * Détail enrichi de la santé MikroTik (au-delà de NetworkHealth brut).
+ * Exposé via `healthCheckDetail()` pour que l'UI puisse indiquer si
+ * l'agent est en ligne, combien de routeurs sont connus, ou si le
+ * mode est simulé (agent mock).
  */
+export interface MikrotikHealthDetail {
+  health: NetworkHealth;
+  configured: boolean;
+  adapterType?: string | null;
+  agentsOnline?: number;
+  routers?: number;
+  routerOnline?: boolean;
+  simulated?: boolean;
+}
 
+/**
+ * MikrotikNetworkAdapter — Fournisseur réseau RÉEL (kind = "live").
+ *
+ * Aucun identifiant MikroTik n'est stocké côté téléphone : tout
+ * passe par la chaîne serveur (Edge Functions + agent local).
+ *
+ * La chaîne utilisée est :
+ *   1. healthCheck    → network-health
+ *   2. authorizeSession → requestWifiSession → waitForMikrotikAuthorization
+ *      (scrutation quota-status jusqu'à confirmation serveur active)
+ *   3. getSessionUsage → quota-status (allocations + compteurs routeur)
+ *   4. disconnectSession → end-wifi-session (enfile commande disconnect
+ *      côté serveur, consommée par l'agent)
+ *
+ * Ne prétend JAMAIS une connexion réussie sans confirmation serveur
+ * explicite. Si le routeur/agent est injoignable, attend ou échoue
+ * explicitement.
+ */
 export class MikrotikNetworkAdapter implements NetworkAccessAdapter {
   readonly name = "mikrotik";
+  readonly providerKind = "live" as const;
 
   constructor(options?: { enabled: boolean }) {
     if (options?.enabled === false) {
@@ -49,31 +77,79 @@ export class MikrotikNetworkAdapter implements NetworkAccessAdapter {
     }
   }
 
+  /**
+   * Santé détaillée (agents/routeurs/simulé) — exposée en UI pour
+   * aider le testeur à vérifier que la chaîne est prête.
+   */
+  async healthCheckDetail(): Promise<MikrotikHealthDetail> {
+    try {
+      const res = await callFunction<{
+        health: NetworkHealth;
+        configured: boolean;
+        adapterType?: string | null;
+        agentOnline?: boolean;
+        routerOnline?: boolean;
+        agents?: Array<Record<string, unknown>>;
+        routers?: Array<Record<string, unknown>>;
+        simulated?: boolean;
+      }>("network-health", { adapter: "mikrotik" });
+
+      if (!res.ok) return { health: "ERROR", configured: false };
+      const d = res.data;
+      return {
+        health: d.health ?? "ERROR",
+        configured: d.configured ?? false,
+        adapterType: d.adapterType,
+        agentsOnline: d.agents?.filter((a) => a.status === "online").length ?? 0,
+        routers: d.routers?.length ?? 0,
+        routerOnline: d.routerOnline ?? false,
+        simulated: d.simulated ?? false,
+      };
+    } catch {
+      return { health: "UNREACHABLE", configured: false };
+    }
+  }
+
   async authorizeSession(input: AuthorizeSessionInput): Promise<AuthorizeSessionResult> {
     try {
-      const res = await callFunction<{ success: boolean; reference?: string; health?: NetworkHealth; reason?: string }>(
-        "network-mikrotik-authorize",
-        {
-          username: input.username,
-          site_id: input.siteId,
-          router_id: input.routerId,
-          allocated_seconds: input.allocatedSeconds,
-          allocated_bytes: input.allocatedBytes,
-          ip_address: input.ipAddress,
-        }
-      );
+      const sessionToken =
+        input.networkSessionReference ?? `mkt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      if (!res.ok) {
-        return { success: false, health: "UNREACHABLE", reason: res.error.code };
+      // 1) Demande la session au serveur (SQL begin_network_session →
+      //    enfile la commande authorize signée pour l'agent).
+      const req = await requestWifiSession({
+        siteId: input.siteId,
+        routerId: input.routerId,
+        sessionToken,
+        deviceObservedIp: input.ipAddress,
+      });
+
+      if (!req.ok) {
+        if (req.outcome === "quota_exhausted" || req.reason === "quota_exhausted") {
+          return { success: false, health: "READY", reason: "quota_exhausted" };
+        }
+        return { success: false, health: "UNREACHABLE", reason: req.reason ?? "session_denied" };
       }
-      if (res.data.success && res.data.reference) {
-        return { success: true, reference: res.data.reference };
+
+      if (!req.sessionId) {
+        return { success: false, health: "ERROR", reason: "no_session_id" };
       }
-      return {
-        success: false,
-        health: res.data.health ?? "NOT_CONFIGURED",
-        reason: res.data.reason,
-      };
+
+      // 2) Attente de la confirmation serveur (l'agent exécute la commande
+      //    sur le routeur puis pose router_session_reference sur la session).
+      const verdict = await waitForMikrotikAuthorization({
+        fetchStatus: () => fetchQuotaStatus(input.siteId ?? getConfig().EXPO_PUBLIC_DEFAULT_SITE_ID ?? null),
+        timeoutMs: 15000,
+      });
+
+      if (verdict.ok) {
+        return { success: true, reference: req.sessionId };
+      }
+
+      if (verdict.signal?.mode === "quota_exhausted") {
+        return { success: false, health: "READY", reason: "quota_exhausted" };
+      }
+      return { success: false, health: "UNREACHABLE", reason: "router_not_confirmed" };
     } catch (e) {
       logger.warn(TAG, "authorizeSession impossible", e);
       return { success: false, health: "UNREACHABLE", reason: "network_error" };
@@ -82,15 +158,16 @@ export class MikrotikNetworkAdapter implements NetworkAccessAdapter {
 
   async getSessionUsage(reference: string): Promise<SessionUsage> {
     try {
-      const res = await callFunction<{ consumed_seconds?: number; consumed_bytes?: number; available: boolean }>(
-        "network-session-usage",
-        { reference, adapter: "mikrotik" }
-      );
-      if (!res.ok) return { consumedSeconds: 0, consumedBytes: 0, available: false };
+      const st = await fetchQuotaStatus(getConfig().EXPO_PUBLIC_DEFAULT_SITE_ID ?? null);
+      const session = st.session;
+      const isActive = session?.session_id === reference && (session?.status === "active" || session?.status === "paused");
+      const a = st.allocation;
+      const quotaBytes = a?.quota_bytes ?? 0;
+      const remainingBytes = Math.max(0, a?.remaining_bytes ?? quotaBytes);
       return {
-        consumedSeconds: res.data.consumed_seconds ?? 0,
-        consumedBytes: res.data.consumed_bytes ?? 0,
-        available: res.data.available,
+        consumedBytes: quotaConsumedBytes(quotaBytes, remainingBytes),
+        consumedSeconds: 0,
+        available: isActive,
       };
     } catch (e) {
       logger.warn(TAG, "getSessionUsage impossible", e);
@@ -100,7 +177,7 @@ export class MikrotikNetworkAdapter implements NetworkAccessAdapter {
 
   async disconnectSession(reference: string): Promise<void> {
     try {
-      await callFunction("network-mikrotik-disconnect", { reference });
+      await endWifiSession(reference, "USER_PAUSED_AD");
     } catch (e) {
       logger.warn(TAG, "disconnectSession impossible", e);
     }

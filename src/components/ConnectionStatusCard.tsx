@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Clock, HardDrive, Sparkles } from "lucide-react-native";
 import { COLORS } from "../constants/theme";
+import type { NetworkProviderKind } from "../network";
 
 export function formatDurationFR(minutes: number): string {
   const totalSeconds = Math.round(minutes * 60);
@@ -27,8 +28,15 @@ interface ConnectionStatusCardProps {
   consumedMB?: number;
   totalQuotaMB?: number;
   networkHealth?: string;
+  providerKind?: NetworkProviderKind;
   lastSyncAt?: string | null;
 }
+
+const PROVIDER_LABEL: Record<NetworkProviderKind, string | null> = {
+  live: "Accès réseau réel (MikroTik)",
+  simulated: "Simulation locale (mode démo)",
+  unconfigured: null,
+};
 
 export default function ConnectionStatusCard({
   connected,
@@ -39,6 +47,7 @@ export default function ConnectionStatusCard({
   consumedMB = 0,
   totalQuotaMB = 0,
   networkHealth,
+  providerKind,
   lastSyncAt
 }: ConnectionStatusCardProps) {
   const statusColor = connected ? COLORS.success : connecting ? COLORS.warning : COLORS.textMuted;
@@ -106,6 +115,9 @@ export default function ConnectionStatusCard({
 
       {(networkHealth || lastSyncAt) && (
         <View style={styles.footer}>
+          {providerKind && PROVIDER_LABEL[providerKind] && (
+            <Text style={styles.providerLabel}>{PROVIDER_LABEL[providerKind]}</Text>
+          )}
           {networkHealth && (
             <View style={styles.footerRow}>
               <View style={[styles.miniDot, { backgroundColor: healthColor }]} />
@@ -239,6 +251,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.12)",
     gap: 4
+  },
+  providerLabel: {
+    color: COLORS.primaryLight,
+    fontSize: 11,
+    fontFamily: "Inter-Bold",
+    marginBottom: 4,
   },
   footerRow: {
     flexDirection: "row",

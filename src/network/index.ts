@@ -8,8 +8,9 @@ import { AndroidVpnDemoAdapter } from "./AndroidVpnDemoAdapter";
 
 export { AndroidVpnDemoAdapter } from "./AndroidVpnDemoAdapter";
 export { DevelopmentNetworkAdapter } from "./DevelopmentNetworkAdapter";
-export { MikrotikNetworkAdapter } from "./MikrotikNetworkAdapter";
+export { MikrotikNetworkAdapter, type MikrotikHealthDetail } from "./MikrotikNetworkAdapter";
 export { RadiusNetworkAdapter } from "./RadiusNetworkAdapter";
+export type { NetworkProviderKind } from "./NetworkAccessAdapter";
 export * from "./NetworkAccessAdapter";
 
 const TAG = "net:factory";
@@ -54,6 +55,7 @@ export function resolveNetworkAdapter(overrideMode?: string): NetworkAccessAdapt
  */
 class UnconfiguredAdapter implements NetworkAccessAdapter {
   readonly name = "unconfigured";
+  readonly providerKind = "unconfigured" as const;
 
   async healthCheck(): Promise<NetworkHealth> {
     return "NOT_CONFIGURED";

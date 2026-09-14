@@ -22,6 +22,8 @@ const TAG = "net:dev";
  */
 export class DevelopmentNetworkAdapter implements NetworkAccessAdapter {
   readonly name = "development";
+  /** Simulation locale de développement. */
+  readonly providerKind = "simulated" as const;
 
   constructor() {
     if (!isDevelopment()) {

@@ -26,8 +26,8 @@ export default function DashboardScreen() {
     refillQuota,
     currentAd,
     networkHealth,
+    networkProviderKind,
     lastSyncAt,
-    networkMode,
   } = useConnection();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -174,7 +174,8 @@ export default function DashboardScreen() {
             quotaMB={usage.remainingQuotaMB}
             consumedMB={usage.todayConsumptionMB}
             totalQuotaMB={usage.totalQuotaMB}
-            networkHealth={networkMode === "android_vpn_demo" ? "READY" : networkHealth}
+            networkHealth={networkHealth}
+            providerKind={networkProviderKind}
             lastSyncAt={lastSyncAt}
           />
 
