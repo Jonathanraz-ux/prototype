@@ -395,15 +395,18 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     if (disposedRef.current) return;
     if (st.allocation || st.session) {
       noteControlSuccess();
-    } else {
-      // Serveur injoignable/sans données : contrôle en panne, compté. Au-delà
-      // du seuil, on coupe explicitement et on exige une ré-autorisation
-      // vérifiée (aucun accès « orphelin » ne doit perdurer).
+    } else if (Object.keys(st).length > 0) {
+      // Serveur a répondu mais aucune allocation/session active : problème
+      // réel de contrôle → compté. Au-delà du seuil, coupe + ré-autorisation.
       const exceeded = noteControlFailure();
       if (exceeded) {
         await suspendInto("error", "NETWORK_LOST", "suspended");
         return;
       }
+    } else {
+      // Fetch échoué (timeout/réseau) : PAS un échec de contrôle.
+      // Le heartbeat reste l'autorité ; on ne coupe pas une session saine
+      // pour une simple noise réseau de ce poll.
     }
     reconcileFromQuota(st);
   }, [defaultSiteId, reconcileFromQuota, noteControlSuccess, noteControlFailure, suspendInto]);

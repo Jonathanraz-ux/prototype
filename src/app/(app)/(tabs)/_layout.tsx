@@ -20,14 +20,15 @@ type TabDef = {
   Icon: LucideIcon;
 };
 
-// Seuls les onglets réellement déclarés ci-dessous existent sous (tabs).
-// C'est la correction de la cause des icônes manquantes : plus aucune
-// route "fantôme" auto-enregistrée sans icône déclarée.
+// Le fichier de chaque onglet vit dans un sous-dossier (dashboard/index.tsx),
+// donc la route réelle EST "dashboard/index". Le name des Tabs.Screen DOIT
+// correspondre exactement au chemin du fichier, sinon Expo Router régénère
+// des onglets par défaut (sans icône, label = nom de route).
 const TABS: TabDef[] = [
-  { routeName: "dashboard", label: "Accueil", Icon: Home },
-  { routeName: "browse", label: "Naviguer", Icon: Compass },
-  { routeName: "history", label: "Historique", Icon: History },
-  { routeName: "profile", label: "Profil", Icon: User }
+  { routeName: "dashboard/index", label: "Accueil", Icon: Home },
+  { routeName: "browse/index", label: "Naviguer", Icon: Compass },
+  { routeName: "history/index", label: "Historique", Icon: History },
+  { routeName: "profile/index", label: "Profil", Icon: User }
 ];
 
 function HapticTabButton(props: BottomTabBarButtonProps) {

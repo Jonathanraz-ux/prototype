@@ -1,6 +1,6 @@
-import { getSupabase } from "./supabase";
 import { getConfig } from "./config";
 import { logger } from "./logger";
+import { getAccessToken, AuthService } from "../services/auth";
 
 const TAG = "functions";
 
@@ -22,51 +22,182 @@ type FunctionResponse<T> =
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
+/** Jeton actuellement disponible (cache + reconnexion si expiré). */
+export async function getApiToken(): Promise<string> {
+  let token = getAccessToken();
+  if (!token) {
+    const session = await AuthService.getSession();
+    if (!session?.access_token) {
+      throw new FunctionError("Aucune session authentifiée", "unauthorized", 401);
+    }
+    token = session.access_token;
+  }
+  return token;
+}
+
 /**
- * Appelle une Supabase Edge Function en injectant le token d'authentification
- * de l'utilisateur courant. Retourne une réponse typée.
+ * Appelle un RPC Postgres en fetch direct (jamais via le client Supabase,
+ * dont le verrou d'authentification peut geler les appels sur l'appareil).
+ * Mêmes règles de jeton que callFunction.
  */
-export async function callFunction<T>(
+export async function callRpc<T>(
   name: string,
-  body?: unknown,
+  body?: Record<string, unknown>,
   options?: { timeoutMs?: number }
 ): Promise<FunctionResponse<T>> {
-  const supabase = getSupabase();
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-
-  let token: string | undefined;
+  let token: string;
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    token = session?.access_token;
-  } catch {
-    token = undefined;
+    token = await getApiToken();
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof FunctionError ? e : new FunctionError("Impossible d'obtenir le jeton", "unauthorized", 401),
+    };
   }
+
+  const config = getConfig();
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const url = `${config.EXPO_PUBLIC_SUPABASE_URL.replace(/\/$/, "")}/rest/v1/rpc/${name}`;
 
   try {
     const response = await Promise.race([
-      supabase.functions.invoke(name, {
-        body: body ?? {},
+      fetch(url, {
+        method: "POST",
         headers: {
-          Authorization: token ? `Bearer ${token}` : "",
+          "Content-Type": "application/json",
+          apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify(body ?? {}),
       }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new FunctionError("Délai dépassé", "timeout", 408)), timeoutMs)
       ),
     ]);
 
-    const { data, error } = response;
+    const raw = await response.text();
 
-    if (error) {
-      const code =
-        (error.context as { code?: string } | undefined)?.code ??
-        (error as { code?: string } | undefined)?.code ??
-        "function_error";
-      logger.warn(TAG, `Edge Function ${name} a échoué`, code);
-      return { ok: false, error: new FunctionError(error.message, code) };
+    if (!response.ok) {
+      const payload = (() => {
+        try {
+          return JSON.parse(raw || "{}");
+        } catch {
+          return {};
+        }
+      })() as { error?: { code?: string; message?: string }; message?: string };
+      const code = payload.error?.code ?? payload.message ?? "rpc_failed";
+      logger.warn(TAG, `RPC ${name} a échoué (HTTP ${response.status})`, code);
+      return {
+        ok: false,
+        error: new FunctionError(
+          payload.error?.message ?? `HTTP ${response.status}`,
+          code,
+          response.status
+        ),
+      };
     }
+
+    const data: unknown = (() => {
+      try {
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return raw || null;
+      }
+    })();
+
+    return { ok: true, data: data as T };
+  } catch (e) {
+    if (e instanceof FunctionError) {
+      return { ok: false, error: e };
+    }
+    const err = e as Error;
+    const message = /network|fetch|connection/i.test(err?.message ?? "")
+      ? "Réseau indisponible. Réessayez."
+      : err?.message ?? "Erreur inconnue";
+    logger.warn(TAG, `Appel RPC ${name} impossible`, message);
+    return { ok: false, error: new FunctionError(message, "network_error", 0) };
+  }
+}
+
+/**
+ * Appelle une Supabase Edge Function en injectant le token d'authentification
+ * de l'utilisateur courant. Retourne une réponse typée.
+ *
+ * Le transport utilise un `fetch` DIRECT (jamais supabase.functions.invoke) :
+ * l'appel passe ALORS par le verrou auth interne du client Supabase, qui peut
+ * rester bloqué indéfiniment et déclencher des timeouts fantômes (408) sur
+ * l'appareil. On gère nous-mêmes le jeton (cache + re-connexion si proche de
+ * l'expiration), ce qui rend chaque appel déterministe.
+ */
+export async function callFunction<T>(
+  name: string,
+  body?: unknown,
+  options?: { timeoutMs?: number }
+): Promise<FunctionResponse<T>> {
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  let token: string | null = null;
+  try {
+    token = await getApiToken();
+  } catch {
+    return {
+      ok: false,
+      error: new FunctionError(
+        "Impossible d'obtenir le jeton",
+        "unauthorized",
+        401
+      ),
+    };
+  }
+
+  const config = getConfig();
+  const url = `${config.EXPO_PUBLIC_SUPABASE_URL.replace(/\/$/, "")}/functions/v1/${name}`;
+
+  try {
+    const response = await Promise.race([
+      fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body ?? {}),
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new FunctionError("Délai dépassé", "timeout", 408)), timeoutMs)
+      ),
+    ]);
+
+    const raw = await response.text();
+
+    if (!response.ok) {
+      const payload = (() => {
+        try {
+          return JSON.parse(raw || "{}");
+        } catch {
+          return {};
+        }
+      })() as { error?: { code?: string; message?: string }; message?: string };
+      const code = payload.error?.code ?? payload.message ?? "function_error";
+      logger.warn(TAG, `Edge Function ${name} a échoué (HTTP ${response.status})`, code);
+      return {
+        ok: false,
+        error: new FunctionError(
+          payload.error?.message ?? `HTTP ${response.status}`,
+          code,
+          response.status
+        ),
+      };
+    }
+
+    const data: unknown = (() => {
+      try {
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return raw || null;
+      }
+    })();
 
     // Certaines fonctions renvoient { error: ... } dans le corps (HTTP 200).
     const payload = data as { error?: { code?: string; message?: string } } | null;

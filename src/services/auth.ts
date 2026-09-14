@@ -5,8 +5,42 @@ import type { User, RegisterData } from "../types";
 
 const TAG = "auth";
 const DEMO_STORAGE_KEY = "@wifizone/demo_user_session";
+const DEMO_EMAIL = "demo@wifizone.app";
 const DEMO_USER_ID = "d9fe1d87-b4a8-4b92-8ebc-d213b2929e8d";
 const DEMO_ORG_ID = "d9fe1d87-b4a8-4b92-8ebc-d213b2929e8d";
+const isDemoNetworkMode = () =>
+  (process.env.EXPO_PUBLIC_NETWORK_MODE ?? "") === "android_vpn_demo";
+
+let _cachedAccessToken: string | null = null;
+
+export function getAccessToken(): string | null {
+  if (_cachedAccessToken) {
+    try {
+      const [, payloadB64] = _cachedAccessToken.split(".");
+      if (payloadB64) {
+        let pad = payloadB64;
+        while (pad.length % 4 !== 0) pad += "=";
+        const payload = JSON.parse(
+          decodeURIComponent(
+            Array.prototype.map
+              .call(
+                atob(pad.replace(/-/g, "+").replace(/_/g, "/")),
+                (c: string) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")
+              )
+              .join("")
+          )
+        );
+        const ttlSec = (payload.exp ?? 0) - Math.floor(Date.now() / 1000);
+        if (ttlSec <= 300) {
+          _cachedAccessToken = null;
+        }
+      }
+    } catch {
+      _cachedAccessToken = null;
+    }
+  }
+  return _cachedAccessToken;
+}
 
 export const DEMO_TEST_USER: User = {
   id: DEMO_USER_ID,
@@ -64,34 +98,46 @@ async function fetchProfile(userId: string): Promise<User | null> {
 
 export const AuthService = {
   async getSession() {
-    try {
-      const { data } = await getSupabase().auth.getSession();
-      if (data.session) return data.session;
-    } catch {
-      // Ignorer erreur réseau en mode démo
-    }
-    const demoRaw = await AsyncStorage.getItem(DEMO_STORAGE_KEY);
-    if (demoRaw) {
+    // Mode démonstration Android : établir une session RÉELLE sur le compte
+    // démo à CHAQUE démarrage pour que les Edge Functions et RPCs (quota,
+    // publicité, session) acceptent le jeton. La persistance du client
+    // Supabase étant peu fiable sur l'appareil, on ne s'appuie jamais sur une
+    // session stockée : un jeton frais garanti (JWT valide) élimine les 401
+    // et les conclusions NETWORK_LOST erronées.
+    const demoPassword = (process.env.EXPO_PUBLIC_DEMO_PASSWORD ?? "").trim();
+    if (isDemoNetworkMode() && demoPassword) {
       try {
-        const u = JSON.parse(demoRaw) as User;
-        return {
-          access_token: "demo-token",
-          token_type: "bearer",
-          expires_in: 3600,
-          refresh_token: "demo-refresh",
-          user: {
-            id: u.id,
-            email: u.email,
-            user_metadata: { full_name: u.fullName },
-            app_metadata: {},
-            aud: "authenticated",
-            created_at: u.createdAt,
-          },
-        } as any;
+        const signed = await Promise.race([
+          getSupabase().auth.signInWithPassword({
+            email: DEMO_EMAIL,
+            password: demoPassword,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), 10000)
+          ),
+        ]);
+        if (!signed.error && signed.data.session) {
+          _cachedAccessToken = signed.data.session.access_token;
+          await AsyncStorage.removeItem(DEMO_STORAGE_KEY);
+          logger.info(TAG, "Session démo réelle établie");
+          return signed.data.session;
+        }
+        if (signed.error) {
+          logger.warn(TAG, "Connexion démo refusée", signed.error.message);
+        }
+      } catch (e) {
+        // Hors-ligne ou indisponible : on retombe sur la session stockée.
+        logger.warn(TAG, "Connexion démo impossible", e);
+      }
+    } else {
+      try {
+        const { data } = await getSupabase().auth.getSession();
+        if (data.session) return data.session;
       } catch {
-        return null;
+        // Ignorer erreur réseau en mode démo
       }
     }
+
     return null;
   },
 
@@ -208,6 +254,7 @@ export const AuthService = {
       });
 
       if (!error && data.user) {
+        _cachedAccessToken = data.session?.access_token ?? null;
         await AsyncStorage.removeItem(DEMO_STORAGE_KEY);
         const profile = await fetchProfile(data.user.id);
         if (profile) return profile;

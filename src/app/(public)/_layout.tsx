@@ -21,8 +21,8 @@ export default function PublicLayout() {
         contentStyle: { backgroundColor: COLORS.background }
       }}
     >
-      <Stack.Screen name="splash" options={{ animation: "fade" }} />
-      <Stack.Screen name="welcome" options={{ animation: "fade_from_bottom" }} />
+      <Stack.Screen name="splash/index" options={{ animation: "fade" }} />
+      <Stack.Screen name="welcome/index" options={{ animation: "fade_from_bottom" }} />
       <Stack.Screen name="login/index" />
       <Stack.Screen name="login/forgot-password" options={{ animation: "slide_from_right" }} />
       <Stack.Screen name="register/index" />

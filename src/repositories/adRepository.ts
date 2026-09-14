@@ -48,6 +48,19 @@ export async function getAvailableCampaign(): Promise<AvailableCampaignResult> {
     logger.warn(TAG, "get-available-campaign impossible", e);
   }
 
+// En mode démo, le téléphone doit être autonome : si le backend plante
+  // ou ne retourne aucune campagne, on fournit la pub de test locale.
+  // En mode prod, on propage l'erreur pour que l'UI affiche le diagnostic.
+  const isDemo = (process.env.EXPO_PUBLIC_NETWORK_MODE ?? "") === "android_vpn_demo";
+  if (isDemo) {
+    logger.info(TAG, "mode démo : fallback sur campagne locale démo", backendError);
+    return {
+      reason: "available",
+      campaign: DEMO_AD_CAMPAIGN,
+      errorMessage: backendError ?? undefined,
+    };
+  }
+
   return {
     reason: "backend_error",
     errorMessage: backendError ?? "Aucune publicité disponible sur le serveur",

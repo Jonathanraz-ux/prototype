@@ -4,10 +4,17 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Inter_400Regular, Inter_700Bold } from "@expo-google-fonts/inter";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
+import { LogBox } from "react-native";
+
 import { AuthProvider } from "../contexts/AuthContext";
 import { ConnectionProvider } from "../contexts/ConnectionContext";
 import { LicenseProvider } from "../contexts/LicenseContext";
 import { COLORS } from "../constants/theme";
+
+LogBox.ignoreLogs([
+  "new NativeEventEmitter",
+  "getDevicePushTokenAsync"
+]);
 
 SplashScreen.preventAutoHideAsync();
 

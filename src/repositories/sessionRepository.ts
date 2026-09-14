@@ -1,5 +1,6 @@
 import { getSupabase } from "../lib/supabase";
-import { callFunction } from "../lib/functions";
+import { callFunction, callRpc, getApiToken } from "../lib/functions";
+import { getConfig } from "../lib/config";
 import { logger } from "../lib/logger";
 import { DEMO_QUOTA_BYTES } from "../lib/sessionControl";
 import type { WifiSession, SessionUsage, ConnectionHistoryItem } from "../types";
@@ -67,6 +68,9 @@ export async function fetchQuotaStatus(
     if (res.ok && res.data) {
       serverData = res.data;
       serverOk = true;
+    } else {
+      const msg = res.ok ? "Données vides" : res.error?.message ?? "Erreur inconnue";
+      logger.warn(TAG, "quota-status not-ok", msg);
     }
   } catch (e) {
     logger.warn(TAG, "quota-status exception", e);
@@ -267,33 +271,31 @@ export async function requestDemoWifiSession(input: {
   heartbeatExpiresAt?: string;
   reason?: string;
 }> {
-  const supabase = getSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, reason: "unauthorized" };
+  let token: string;
+  try {
+    token = await getApiToken();
+  } catch {
+    return { ok: false, reason: "unauthorized" };
+  }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .maybeSingle();
+  const userId = decodeSub(token);
+  if (!userId) return { ok: false, reason: "unauthorized" };
 
-  if (!profile?.organization_id) return { ok: false, reason: "no_organization" };
+  const profile = await fetchProfileOrg(userId, token);
+  if (!profile) return { ok: false, reason: "no_organization" };
 
-  const { data, error } = await (supabase.rpc as any)("request_demo_wifi_session", {
-    p_user_id: user.id,
+  const res = await callRpc<Record<string, unknown>>("request_demo_wifi_session", {
+    p_user_id: userId,
     p_organization_id: profile.organization_id,
     p_site_id: input.siteId ?? null,
     p_session_token: input.sessionToken ?? "demo-token",
   });
 
-  if (error || !data) {
-    logger.warn(TAG, "request_demo_wifi_session rpc failed", error?.message);
-    return { ok: false, reason: error?.message ?? "session_failed" };
+  if (!res.ok || res.data === null) {
+    return { ok: false, reason: "session_failed" };
   }
 
-  const d = data as Record<string, unknown>;
+  const d = res.data;
   const outcome = (d.outcome as string) ?? "unknown";
   const createOrResume = outcome === "created" || outcome === "resume";
   return {
@@ -306,6 +308,44 @@ export async function requestDemoWifiSession(input: {
     heartbeatExpiresAt: (d.heartbeat_expires_at as string) ?? undefined,
     reason: createOrResume ? undefined : ((d.reason as string) ?? outcome),
   };
+}
+
+function decodeSub(token: string): string | null {
+  try {
+    const [, payloadB64] = token.split(".");
+    if (!payloadB64) return null;
+    let pad = payloadB64;
+    while (pad.length % 4 !== 0) pad += "=";
+    const json = decodeURIComponent(
+      Array.prototype.map
+        .call(atob(pad.replace(/-/g, "+").replace(/_/g, "/")), (c: string) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join("")
+    );
+    return (JSON.parse(json) as { sub?: string }).sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchProfileOrg(
+  userId: string,
+  token: string
+): Promise<{ organization_id: string | null } | null> {
+  try {
+    const config = getConfig();
+    const url = `${config.EXPO_PUBLIC_SUPABASE_URL.replace(/\/$/, "")}/rest/v1/profiles?id=eq.${userId}&select=organization_id`;
+    const response = await fetch(url, {
+      headers: {
+        apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()) as { organization_id: string | null }[];
+    return rows?.[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -322,25 +362,28 @@ export async function simulateDemoConsumption(
   exhausted?: boolean;
   reason?: string;
 }> {
-  const supabase = getSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, reason: "unauthorized" };
+  let token: string;
+  try {
+    token = await getApiToken();
+  } catch {
+    return { ok: false, reason: "unauthorized" };
+  }
+
+  const userId = decodeSub(token);
+  if (!userId) return { ok: false, reason: "unauthorized" };
 
   const idempotencyKey = `demo_sim_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const { data, error } = await (supabase.rpc as any)("demo_consume_quota", {
-    p_user_id: user.id,
+  const res = await callRpc<Record<string, unknown>>("demo_consume_quota", {
+    p_user_id: userId,
     p_bytes: bytesToConsume,
     p_idempotency_key: idempotencyKey,
   });
 
-  if (error || !data) {
-    logger.warn(TAG, "demo_consume_quota RPC failed", error?.message);
-    return { ok: false, reason: error?.message ?? "quota_failed" };
+  if (!res.ok || res.data === null) {
+    return { ok: false, reason: "quota_failed" };
   }
 
-  const d = data as Record<string, unknown>;
+  const d = res.data;
   return {
     ok: Boolean(d.ok),
     consumedBytes: Number(d.consumed_bytes ?? 0),
@@ -360,23 +403,26 @@ export async function resetDemoQuota(): Promise<{
   quotaBytes?: number;
   reason?: string;
 }> {
-  const supabase = getSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, reason: "unauthorized" };
+  let token: string;
+  try {
+    token = await getApiToken();
+  } catch {
+    return { ok: false, reason: "unauthorized" };
+  }
 
-  const { data, error } = await (supabase.rpc as any)("demo_reset_quota", {
-    p_user_id: user.id,
+  const userId = decodeSub(token);
+  if (!userId) return { ok: false, reason: "unauthorized" };
+
+  const res = await callRpc<Record<string, unknown>>("demo_reset_quota", {
+    p_user_id: userId,
     p_quota_bytes: DEMO_QUOTA_BYTES, // 5 GiB, octets explicites
   });
 
-  if (error || !data) {
-    logger.warn(TAG, "demo_reset_quota RPC failed", error?.message);
-    return { ok: false, reason: error?.message ?? "reset_failed" };
+  if (!res.ok || res.data === null) {
+    return { ok: false, reason: "reset_failed" };
   }
 
-  const d = data as Record<string, unknown>;
+  const d = res.data;
   return {
     ok: Boolean(d.ok),
     remainingBytes: Number(d.remaining_bytes ?? 0),
