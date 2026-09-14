@@ -7,7 +7,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
-  TextInput
+  TextInput,
+  StyleSheet
 } from "react-native";
 import { useRouter } from "expo-router";
 import { User, Mail, Phone, Lock, ArrowRight } from "lucide-react-native";
@@ -62,98 +63,85 @@ export default function RegisterScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      className="flex-1 bg-[#09090B]"
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.screen}>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 56, paddingBottom: 48 }}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
-          <Pressable onPress={() => router.back()} className="mb-6 flex-row items-center">
-            <Text className="text-zinc-400 text-sm" style={{ fontFamily: "Inter-Regular" }}>
-              Retour
-            </Text>
+          <Pressable onPress={() => router.back()} style={styles.backRow}>
+            <Text style={styles.backText}>Retour</Text>
           </Pressable>
 
-          <View className="mb-8">
-            <Text className="text-3xl font-bold text-white mb-2" style={{ fontFamily: "Inter-Bold" }}>
-              Créer un compte
-            </Text>
-            <Text className="text-zinc-400 text-base" style={{ fontFamily: "Inter-Regular" }}>
-              Rejoignez WiFi Zone dès maintenant
-            </Text>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Créer un compte</Text>
+            <Text style={styles.headerSub}>Rejoignez Bôjô dès maintenant</Text>
           </View>
 
           {error ? (
-            <View className="mb-4 p-3 rounded-2xl" style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", borderWidth: 1, borderColor: "rgba(239, 68, 68, 0.3)" }}>
-              <Text className="text-xs text-red-400" style={{ fontFamily: "Inter-Regular" }}>{error}</Text>
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
 
-          <View className="gap-4">
-            <View className="flex-row gap-3">
-              <View className="flex-1 gap-2">
-                <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Prénom</Text>
-                <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+          <View style={{ gap: 14 }}>
+            <View style={styles.row}>
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={styles.label}>Prénom</Text>
+                <View style={styles.field}>
                   <User color={COLORS.textMuted} size={18} />
-                  <TextInput value={firstName} onChangeText={setFirstName} placeholder="Jean" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} />
+                  <TextInput value={firstName} onChangeText={setFirstName} placeholder="Jean" placeholderTextColor={COLORS.textMuted} style={styles.input} accessibilityLabel="Prénom" />
                 </View>
               </View>
-              <View className="flex-1 gap-2">
-                <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Nom</Text>
-                <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={styles.label}>Nom</Text>
+                <View style={styles.field}>
                   <User color={COLORS.textMuted} size={18} />
-                  <TextInput value={lastName} onChangeText={setLastName} placeholder="Dupont" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} />
+                  <TextInput value={lastName} onChangeText={setLastName} placeholder="Dupont" placeholderTextColor={COLORS.textMuted} style={styles.input} accessibilityLabel="Nom" />
                 </View>
               </View>
             </View>
 
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Téléphone</Text>
-              <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Téléphone</Text>
+              <View style={styles.field}>
                 <Phone color={COLORS.textMuted} size={18} />
-                <TextInput value={phone} onChangeText={setPhone} placeholder="+33 6 12 34 56 78" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} keyboardType="phone-pad" />
+                <TextInput value={phone} onChangeText={setPhone} placeholder="+33 6 12 34 56 78" placeholderTextColor={COLORS.textMuted} style={styles.input} keyboardType="phone-pad" accessibilityLabel="Téléphone" />
               </View>
             </View>
 
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Email</Text>
-              <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Email</Text>
+              <View style={styles.field}>
                 <Mail color={COLORS.textMuted} size={18} />
-                <TextInput value={email} onChangeText={setEmail} placeholder="exemple@email.com" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} keyboardType="email-address" autoCapitalize="none" />
+                <TextInput value={email} onChangeText={setEmail} placeholder="exemple@email.com" placeholderTextColor={COLORS.textMuted} style={styles.input} keyboardType="email-address" autoCapitalize="none" accessibilityLabel="Adresse email" />
               </View>
             </View>
 
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Mot de passe</Text>
-              <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Mot de passe</Text>
+              <View style={styles.field}>
                 <Lock color={COLORS.textMuted} size={18} />
-                <TextInput value={password} onChangeText={setPassword} placeholder="Minimum 6 caractères" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} secureTextEntry />
+                <TextInput value={password} onChangeText={setPassword} placeholder="Minimum 6 caractères" placeholderTextColor={COLORS.textMuted} style={styles.input} secureTextEntry accessibilityLabel="Mot de passe" />
               </View>
             </View>
 
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Confirmer le mot de passe</Text>
-              <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Confirmer le mot de passe</Text>
+              <View style={styles.field}>
                 <Lock color={COLORS.textMuted} size={18} />
-                <TextInput value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Répéter le mot de passe" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} secureTextEntry />
+                <TextInput value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Répéter le mot de passe" placeholderTextColor={COLORS.textMuted} style={styles.input} secureTextEntry accessibilityLabel="Confirmation du mot de passe" />
               </View>
             </View>
 
             <PrimaryButton title="Créer mon compte" onPress={handleRegister} loading={loading} icon={ArrowRight} />
           </View>
 
-          <View className="flex-row justify-center mt-8">
-            <Text className="text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-              Déjà un compte ?{" "}
-            </Text>
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Déjà un compte ?{" "}</Text>
             <Pressable onPress={() => router.back()}>
-              <Text className="font-semibold" style={{ color: COLORS.accent, fontFamily: "Inter-Bold" }}>
-                Se connecter
-              </Text>
+              <Text style={styles.footerLink}>Se connecter</Text>
             </Pressable>
           </View>
         </Animated.View>
@@ -161,3 +149,39 @@ export default function RegisterScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
+  scroll: { paddingHorizontal: 24, paddingTop: 56, paddingBottom: 48 },
+  backRow: { marginBottom: 24 },
+  backText: { color: COLORS.textSecondary, fontSize: 14, fontFamily: "Inter-Regular" },
+  header: { marginBottom: 20 },
+  headerTitle: { color: COLORS.textPrimary, fontSize: 28, fontFamily: "Inter-Bold", marginBottom: 4 },
+  headerSub: { color: COLORS.textSecondary, fontSize: 15, fontFamily: "Inter-Regular" },
+  errorBox: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.3)"
+  },
+  errorText: { color: COLORS.danger, fontSize: 12, fontFamily: "Inter-Regular" },
+  label: { color: COLORS.textSecondary, fontSize: 14, marginLeft: 4, fontFamily: "Inter-Regular" },
+  field: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    height: 56,
+    backgroundColor: "rgba(255,255,255,0.12)"
+  },
+  input: { flex: 1, color: COLORS.textPrimary, fontSize: 15, fontFamily: "Inter-Regular" },
+  row: { flexDirection: "row", gap: 10 },
+  footer: { flexDirection: "row", justifyContent: "center", marginTop: 28 },
+  footerText: { color: COLORS.textMuted, fontFamily: "Inter-Regular" },
+  footerLink: { color: COLORS.accent, fontFamily: "Inter-Bold" }
+});

@@ -1,16 +1,34 @@
 import { z } from "zod";
 
+const emptyToUndefined = (val: unknown) =>
+  typeof val === "string" && val.trim() === "" ? undefined : val;
+
 const envSchema = z.object({
   EXPO_PUBLIC_SUPABASE_URL: z.string().url("EXPO_PUBLIC_SUPABASE_URL doit être une URL valide"),
   EXPO_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1, "EXPO_PUBLIC_SUPABASE_ANON_KEY est requis"),
   EXPO_PUBLIC_APP_ENV: z.enum(["development", "pilot", "production"]).default("development"),
-  EXPO_PUBLIC_LICENSE_API_URL: z.string().url("EXPO_PUBLIC_LICENSE_API_URL doit être une URL valide").optional(),
-  EXPO_PUBLIC_PRIVACY_POLICY_URL: z.string().url().optional(),
-  EXPO_PUBLIC_TERMS_URL: z.string().url().optional(),
-  EXPO_PUBLIC_SUPPORT_PHONE: z.string().optional(),
-  EXPO_PUBLIC_SUPPORT_EMAIL: z.string().email().optional(),
-  EXPO_PUBLIC_DEFAULT_SITE_ID: z.string().uuid().optional(),
-  EXPO_PUBLIC_NETWORK_MODE: z.enum(["mikrotik", "android_vpn_demo", "mock"]).default("mikrotik"),
+  EXPO_PUBLIC_LICENSE_API_URL: z.preprocess(
+    emptyToUndefined,
+    z.string().url("EXPO_PUBLIC_LICENSE_API_URL doit être une URL valide").optional()
+  ),
+  EXPO_PUBLIC_PRIVACY_POLICY_URL: z.preprocess(
+    emptyToUndefined,
+    z.string().url("EXPO_PUBLIC_PRIVACY_POLICY_URL doit être une URL valide").optional()
+  ),
+  EXPO_PUBLIC_TERMS_URL: z.preprocess(
+    emptyToUndefined,
+    z.string().url("EXPO_PUBLIC_TERMS_URL doit être une URL valide").optional()
+  ),
+  EXPO_PUBLIC_SUPPORT_PHONE: z.preprocess(emptyToUndefined, z.string().optional()),
+  EXPO_PUBLIC_SUPPORT_EMAIL: z.preprocess(
+    emptyToUndefined,
+    z.string().email("EXPO_PUBLIC_SUPPORT_EMAIL doit être un email valide").optional()
+  ),
+  EXPO_PUBLIC_DEFAULT_SITE_ID: z.preprocess(
+    emptyToUndefined,
+    z.string().uuid("EXPO_PUBLIC_DEFAULT_SITE_ID doit être un UUID valide").optional()
+  ),
+  EXPO_PUBLIC_NETWORK_MODE: z.enum(["mikrotik", "android_vpn_demo", "mock"]).default("android_vpn_demo"),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -30,7 +48,7 @@ export function getConfig(): EnvConfig {
     EXPO_PUBLIC_SUPPORT_PHONE: process.env.EXPO_PUBLIC_SUPPORT_PHONE ?? "",
     EXPO_PUBLIC_SUPPORT_EMAIL: process.env.EXPO_PUBLIC_SUPPORT_EMAIL ?? "",
     EXPO_PUBLIC_DEFAULT_SITE_ID: process.env.EXPO_PUBLIC_DEFAULT_SITE_ID ?? "",
-    EXPO_PUBLIC_NETWORK_MODE: process.env.EXPO_PUBLIC_NETWORK_MODE ?? "mikrotik",
+    EXPO_PUBLIC_NETWORK_MODE: process.env.EXPO_PUBLIC_NETWORK_MODE ?? "android_vpn_demo",
   };
 
   const result = envSchema.safeParse(raw);

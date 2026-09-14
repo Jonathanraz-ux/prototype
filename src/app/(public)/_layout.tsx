@@ -8,7 +8,7 @@ export default function PublicLayout() {
 
   if (isLoading) {
     return (
-      <View className="flex-1 bg-[#09090B] items-center justify-center">
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: COLORS.background }}>
         <ActivityIndicator color={COLORS.accent} size="large" />
       </View>
     );
@@ -18,7 +18,7 @@ export default function PublicLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: "#09090B" }
+        contentStyle: { backgroundColor: COLORS.background }
       }}
     >
       <Stack.Screen name="splash" options={{ animation: "fade" }} />

@@ -31,6 +31,10 @@ ios/
 # typescript
 *.tsbuildinfo
 
+# build artifacts locaux (APK autonomes, classes compilées)
+*.apk
+classes/
+
 # deno (local verification of edge functions)
 deno.lock
 

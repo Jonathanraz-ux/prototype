@@ -127,10 +127,10 @@ export default function ConnectionStatusCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "rgba(24, 24, 27, 0.72)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
+    borderColor: "rgba(255,255,255,0.14)",
     padding: 18,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
-    backgroundColor: "rgba(249, 115, 22, 0.14)"
+    backgroundColor: "rgba(255,255,255,0.16)"
   },
   chipText: {
     color: COLORS.primaryLight,
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     marginTop: 12,
     marginBottom: 12
   },
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
   metricDivider: {
     width: 1,
     height: 30,
-    backgroundColor: "rgba(255,255,255,0.07)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     marginHorizontal: 14
   },
   metricIcon: {
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)"
+    backgroundColor: "rgba(255,255,255,0.12)"
   },
   metricLabel: {
     color: COLORS.textMuted,
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopColor: "rgba(255,255,255,0.12)",
     gap: 4
   },
   footerRow: {

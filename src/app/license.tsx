@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-nati
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { Clock, Ban, WifiOff, RefreshCw, PhoneCall } from "lucide-react-native";
-import { COLORS, GRADIENTS } from "../constants/theme";
+import { COLORS } from "../constants/theme";
 import { useLicense } from "../contexts/LicenseContext";
 import { useAuth } from "../contexts/AuthContext";
 import { getConfig } from "../lib/config";
@@ -63,7 +63,7 @@ export default function LicenceGateScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#0F1115", "#09090B"]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={["#4A0EC8", "#5912ED"]} style={StyleSheet.absoluteFill} />
       <View style={styles.card}>
         <View style={[styles.iconWrap, { borderColor: `${color}40`, backgroundColor: `${color}15` }]}>
           {icon}
@@ -82,8 +82,7 @@ export default function LicenceGateScreen() {
       <View style={styles.actions}>
         {gate.status === "unreachable" && (
           <Pressable onPress={() => refresh()} style={styles.retryButton}>
-            <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-            <RefreshCw color="#FFFFFF" size={18} />
+            <RefreshCw color={COLORS.actionFg} size={18} />
             <Text style={styles.retryText}>Réessayer</Text>
           </Pressable>
         )}
@@ -105,17 +104,17 @@ export default function LicenceGateScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#09090B",
+    backgroundColor: COLORS.background,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 28,
   },
   card: {
     alignItems: "center",
-    backgroundColor: "rgba(24, 24, 27, 0.72)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
+    borderColor: "rgba(255,255,255,0.14)",
     padding: 28,
     paddingHorizontal: 24,
   },
@@ -165,10 +164,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     gap: 8,
-    overflow: "hidden",
+    backgroundColor: COLORS.actionBg,
+    shadowColor: COLORS.backgroundDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 8,
   },
   retryText: {
-    color: "#FFFFFF",
+    color: COLORS.actionFg,
     fontSize: 15,
     fontFamily: "Inter-Bold",
   },

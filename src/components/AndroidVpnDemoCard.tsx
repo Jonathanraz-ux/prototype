@@ -18,6 +18,7 @@ import {
 } from "lucide-react-native";
 import { COLORS, GRADIENTS } from "../constants/theme";
 import { useConnection } from "../contexts/ConnectionContext";
+import { vpnBlocker, type VpnBlockerStatus } from "../services/vpnBlocker";
 
 export default function AndroidVpnDemoCard() {
   const {
@@ -35,6 +36,26 @@ export default function AndroidVpnDemoCard() {
 
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [showDiagModal, setShowDiagModal] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<VpnBlockerStatus | null>(null);
+
+  const refreshLiveStatus = async () => {
+    if (!vpnBlocker.isAvailable()) return;
+    try {
+      setLiveStatus(await vpnBlocker.getStatus());
+    } catch {
+      // ignore
+    }
+  };
+
+  const openDiag = () => {
+    setShowDiagModal(true);
+    void refreshLiveStatus();
+  };
+
+  const diag = liveStatus ?? vpnStatus;
+  // « Valide » UNIQUEMENT si la session serveur est active ET l'autorisation
+  // native est réellement accordée et non expirée (TTL natif > 0).
+  const hasValidAuth = state === "wifi_active" && (diag?.authTtlMs ?? 0) > 0;
 
   const isDemo = networkMode === "android_vpn_demo";
   const isBlocked = vpnStatus?.state === "BLOCKED" || vpnStatus?.tunnelUp;
@@ -154,7 +175,7 @@ export default function AndroidVpnDemoCard() {
               <Text style={styles.bannerSub}>
                 {isAllowed
                   ? "Tunnel de blocage retiré (session active)"
-                  : "Tunnel TUN actif — WiFi Zone conserve son accès"}
+                  : "Tunnel TUN actif — Bôjô conserve son accès"}
               </Text>
             </View>
           </View>
@@ -224,7 +245,7 @@ export default function AndroidVpnDemoCard() {
 
           {/* Boutons Diagnostic & Quitter */}
           <View style={styles.footerRow}>
-            <Pressable onPress={() => setShowDiagModal(true)} style={styles.diagBtn}>
+            <Pressable onPress={openDiag} style={styles.diagBtn}>
               <Info color={COLORS.textSecondary} size={14} />
               <Text style={styles.diagBtnText}>Diagnostic</Text>
             </Pressable>
@@ -260,7 +281,7 @@ export default function AndroidVpnDemoCard() {
               />
               <DiagItem
                 label="Tunnel TUN (blocage)"
-                value={vpnStatus?.tunnelUp ? "Actif (Capture tout sauf WiFi Zone)" : "Retiré (Trafic libre)"}
+                value={vpnStatus?.tunnelUp ? "Actif (Capture tout sauf Bôjô)" : "Retiré (Trafic libre)"}
                 ok={true}
               />
               <DiagItem
@@ -270,8 +291,19 @@ export default function AndroidVpnDemoCard() {
               />
               <DiagItem
                 label="Validation serveur"
-                value={state === "wifi_active" ? "Valide (session active)" : "En attente / expirée"}
-                ok={state === "wifi_active"}
+                value={
+                  hasValidAuth
+                    ? "Valide (session active + TTL natif > 0)"
+                    : state === "wifi_active"
+                    ? "Session OK mais autorisation natif expirée"
+                    : "En attente / expirée"
+                }
+                ok={hasValidAuth}
+              />
+              <DiagItem
+                label="Autorisation native"
+                value={`TTL restant : ${((diag?.authTtlMs ?? 0) / 1000).toFixed(0)} s`}
+                ok={(diag?.authTtlMs ?? 0) > 0}
               />
               <DiagItem
                 label="Génération session"
@@ -284,14 +316,14 @@ export default function AndroidVpnDemoCard() {
                 ok={usage.remainingQuotaMB > 0}
               />
               <DiagItem
-                label="Exclusion WiFi Zone"
+                label="Exclusion Bôjô"
                 value="Active (addDisallowedApplication)"
                 ok={true}
               />
               <View style={styles.diagNotice}>
                 <Info color="#F59E0B" size={14} />
                 <Text style={styles.diagNoticeText}>
-                  WiFi Zone conserve l'accès réseau pour contacter Supabase et charger les publicités. Pour prouver la suspension, testez depuis Chrome ou YouTube en mode écran partagé.
+                  Bôjô conserve l'accès réseau pour contacter Supabase et charger les publicités. Pour prouver la suspension, testez depuis Chrome ou YouTube en mode écran partagé.
                 </Text>
               </View>
             </ScrollView>

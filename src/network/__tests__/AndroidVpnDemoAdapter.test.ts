@@ -20,4 +20,13 @@ describe("AndroidVpnDemoAdapter & resolveNetworkAdapter", () => {
     const adapter = new AndroidVpnDemoAdapter();
     await expect(adapter.disconnectSession("ref-123")).resolves.not.toThrow();
   });
+
+  it("authorizeSession NE DÉBLOQUE JAMAIS sans validation serveur explicite", async () => {
+    const adapter = new AndroidVpnDemoAdapter();
+    const res = await adapter.authorizeSession({ allocatedSeconds: 60 } as any);
+    if (res.success === true) {
+      throw new Error("authorizeSession ne doit jamais renvoyer success=true");
+    }
+    expect(res).toEqual(expect.objectContaining({ success: false }));
+  });
 });

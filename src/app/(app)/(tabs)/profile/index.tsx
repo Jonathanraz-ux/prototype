@@ -1,16 +1,19 @@
 import React, { useRef, useEffect, useState } from "react";
-import { View, Text, ScrollView, Animated, Pressable } from "react-native";
+import { View, Text, ScrollView, Animated, Pressable, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { User, LogOut, Clock, HardDrive, Sparkles, ChevronRight } from "lucide-react-native";
-import { COLORS, SPACING, ANIMATION_DURATION } from "../../../../constants/theme";
+import { User, LogOut, Clock, HardDrive, Sparkles, ChevronRight, Cog } from "lucide-react-native";
+import { COLORS, ANIMATION_DURATION } from "../../../../constants/theme";
 import { useAuth } from "../../../../contexts/AuthContext";
 import { useConnection } from "../../../../contexts/ConnectionContext";
 import { formatDurationFR, formatDataFR } from "../../../../components/ConnectionStatusCard";
+import AppHeader from "../../../../components/AppHeader";
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const { usage } = useConnection();
+  const insets = useSafeAreaInsets();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(true);
 
@@ -26,111 +29,198 @@ export default function ProfileScreen() {
 
   if (loading || !user) {
     return (
-      <ScrollView className="flex-1 bg-[#09090B] px-6 pt-6" contentContainerStyle={{ paddingBottom: SPACING.xxl }}>
-        <View className="gap-4">
+      <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
+        <View className="gap-4 px-6">
           {[1, 2].map((i) => (
-            <View key={i} className="h-24 rounded-2xl" style={{ backgroundColor: COLORS.card }} />
+            <View key={i} className="h-24 rounded-2xl" style={{ backgroundColor: COLORS.surface }} />
           ))}
         </View>
-      </ScrollView>
+      </View>
     );
   }
 
   const planLabel = "Standard";
 
   return (
-    <ScrollView
-      className="flex-1 bg-[#09090B]"
-      contentContainerStyle={{ paddingHorizontal: SPACING.screen, paddingTop: 56, paddingBottom: 120 }}
-      showsVerticalScrollIndicator={false}
-    >
-      <Animated.View style={{ opacity: fadeAnim }} className="gap-8">
-        <View className="items-center">
-          <View
-            className="w-24 h-24 rounded-full items-center justify-center mb-4"
-            style={{ backgroundColor: "rgba(255, 138, 0, 0.14)", borderWidth: 2, borderColor: COLORS.primary }}
+    <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 110 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View style={{ gap: 8, opacity: fadeAnim }}>
+          <AppHeader title="Profil" showBell={false} />
+
+          <View style={styles.avatarWrap}>
+            <View style={styles.avatar}>
+              <User color={COLORS.textPrimary} size={36} />
+            </View>
+            <Text style={styles.name}>
+              {user.firstName} {user.lastName}
+            </Text>
+            <Text style={styles.email}>{user.email}</Text>
+            <View style={styles.planBadge}>
+              <Text style={styles.planBadgeText}>Compte {planLabel}</Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Sparkles color={COLORS.accent} size={14} />
+              <Text style={styles.cardHeaderText}>Internet financé par la publicité</Text>
+            </View>
+            <View style={styles.metrics}>
+              <View style={styles.metric}>
+                <View style={styles.metricIcon}>
+                  <HardDrive color={COLORS.accent} size={18} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.metricLabel}>Données restantes</Text>
+                  <Text style={styles.metricValue}>
+                    {formatDataFR(usage.remainingQuotaMB)} sur {formatDataFR(usage.totalQuotaMB)}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.metric}>
+                <View style={styles.metricIcon}>
+                  <Clock color={COLORS.accent} size={18} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.metricLabel}>Temps restant</Text>
+                  <Text style={styles.metricValue}>
+                    {formatDurationFR(usage.remainingTimeMinutes)} sur {formatDurationFR(usage.totalTimeMinutes)}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <Pressable
+            onPress={() => router.push("/(app)/profile/edit")}
+            style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}
           >
-            <User color={COLORS.primaryLight} size={36} />
-          </View>
-          <Text className="text-xl font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>
-            {user.firstName} {user.lastName}
-          </Text>
-          <Text className="text-sm text-zinc-400 mt-1" style={{ fontFamily: "Inter-Regular" }}>
-            {user.email}
-          </Text>
-          <View className="px-3 py-1 rounded-full mt-3" style={{ backgroundColor: "rgba(255, 138, 0, 0.14)", borderWidth: 1, borderColor: "rgba(255, 138, 0, 0.5)" }}>
-            <Text className="text-xs font-medium" style={{ color: COLORS.accentSoft, fontFamily: "Inter-Bold" }}>
-              Compte {planLabel}
-            </Text>
-          </View>
-        </View>
-
-        <View className="rounded-3xl border border-white/5 p-5" style={{ backgroundColor: "rgba(24, 24, 27, 0.72)" }}>
-          <View className="flex-row items-center gap-2 mb-4">
-            <Sparkles color={COLORS.accentSoft} size={14} />
-            <Text className="text-xs text-zinc-500 uppercase tracking-widest" style={{ fontFamily: "Inter-Regular" }}>
-              Internet financé par la publicité
-            </Text>
-          </View>
-          <View className="gap-4">
-            <View className="flex-row items-center gap-3">
-              <View className="w-10 h-10 rounded-xl items-center justify-center" style={{ backgroundColor: "rgba(255, 138, 0, 0.12)" }}>
-                <HardDrive color={COLORS.primaryLight} size={18} />
-              </View>
-              <View className="flex-1">
-                <Text className="text-xs text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-                  Données restantes
-                </Text>
-                <Text className="text-sm text-white font-medium" style={{ fontFamily: "Inter-Regular" }}>
-                  {formatDataFR(usage.remainingQuotaMB)} sur {formatDataFR(usage.totalQuotaMB)}
-                </Text>
-              </View>
+            <View style={styles.rowIcon}>
+              <User color={COLORS.accent} size={20} />
             </View>
-            <View className="flex-row items-center gap-3">
-              <View className="w-10 h-10 rounded-xl items-center justify-center" style={{ backgroundColor: "rgba(255, 138, 0, 0.12)" }}>
-                <Clock color={COLORS.accentSoft} size={18} />
-              </View>
-              <View className="flex-1">
-                <Text className="text-xs text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-                  Temps restant
-                </Text>
-                <Text className="text-sm text-white font-medium" style={{ fontFamily: "Inter-Regular" }}>
-                  {formatDurationFR(usage.remainingTimeMinutes)} sur {formatDurationFR(usage.totalTimeMinutes)}
-                </Text>
-              </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>Modifier le profil</Text>
+              <Text style={styles.rowSubtitle}>Nom, email, téléphone</Text>
             </View>
-          </View>
-        </View>
+            <ChevronRight color={COLORS.textMuted} size={18} />
+          </Pressable>
 
-        <Pressable
-          onPress={() => router.push("/(app)/profile/edit")}
-          className="rounded-2xl border border-white/5 p-4 flex-row items-center gap-4"
-          style={{ backgroundColor: "rgba(24, 24, 27, 0.72)" }}
-        >
-          <View className="w-11 h-11 rounded-2xl items-center justify-center" style={{ backgroundColor: "rgba(255, 138, 0, 0.12)" }}>
-            <User color={COLORS.primaryLight} size={20} />
-          </View>
-          <View className="flex-1">
-            <Text className="text-sm text-white font-medium" style={{ fontFamily: "Inter-Regular" }}>
-              Modifier le profil
-            </Text>
-            <Text className="text-xs text-zinc-500 mt-0.5" style={{ fontFamily: "Inter-Regular" }}>
-              Nom, email, téléphone
-            </Text>
-          </View>
-          <ChevronRight color={COLORS.textMuted} size={18} />
-        </Pressable>
+          <Pressable
+            onPress={() => router.push("/(app)/settings")}
+            style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <View style={styles.rowIcon}>
+              <Cog color={COLORS.accent} size={20} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>Paramètres</Text>
+              <Text style={styles.rowSubtitle}>Thème, langue, notifications</Text>
+            </View>
+            <ChevronRight color={COLORS.textMuted} size={18} />
+          </Pressable>
 
-        <Pressable
-          onPress={handleLogout}
-          className="rounded-2xl border border-red-500/20 p-4 flex-row items-center justify-center gap-3"
-        >
-          <LogOut color={COLORS.danger} size={20} />
-          <Text className="text-sm font-semibold text-red-400" style={{ fontFamily: "Inter-Bold" }}>
-            Se déconnecter
-          </Text>
-        </Pressable>
-      </Animated.View>
-    </ScrollView>
+          <Pressable
+            onPress={handleLogout}
+            style={({ pressed }) => [styles.logoutButton, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <LogOut color={COLORS.danger} size={20} />
+            <Text style={styles.logoutText}>Se déconnecter</Text>
+          </Pressable>
+        </Animated.View>
+      </ScrollView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
+  avatarWrap: { alignItems: "center", marginTop: 8, marginBottom: 18 },
+  avatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.3)"
+  },
+  name: { color: COLORS.textPrimary, fontSize: 20, fontFamily: "Inter-Bold" },
+  email: { color: COLORS.textSecondary, fontSize: 13, marginTop: 3, fontFamily: "Inter-Regular" },
+  planBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
+    marginTop: 10,
+    backgroundColor: COLORS.actionBg,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)"
+  },
+  planBadgeText: { color: COLORS.actionFg, fontSize: 12, fontFamily: "Inter-Bold" },
+  card: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    padding: 18,
+    marginTop: 6
+  },
+  cardHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
+  cardHeaderText: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    fontFamily: "Inter-Bold"
+  },
+  metrics: { gap: 16 },
+  metric: { flexDirection: "row", alignItems: "center", gap: 12 },
+  metricIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)"
+  },
+  metricLabel: { color: COLORS.textMuted, fontSize: 11, fontFamily: "Inter-Regular" },
+  metricValue: { color: COLORS.textPrimary, fontSize: 14, marginTop: 2, fontFamily: "Inter-Bold" },
+  row: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginTop: 10
+  },
+  rowIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)"
+  },
+  rowTitle: { color: COLORS.textPrimary, fontSize: 14, fontFamily: "Inter-Bold" },
+  rowSubtitle: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2, fontFamily: "Inter-Regular" },
+  logoutButton: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.3)",
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 18
+  },
+  logoutText: { color: COLORS.danger, fontSize: 14, fontFamily: "Inter-Bold" }
+});

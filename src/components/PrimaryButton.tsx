@@ -9,6 +9,7 @@ interface PrimaryButtonProps {
   loading?: boolean;
   disabled?: boolean;
   icon?: LucideIcon;
+  variant?: "primary" | "secondary";
   style?: object;
   className?: string;
 }
@@ -19,6 +20,7 @@ export default function PrimaryButton({
   loading = false,
   disabled = false,
   icon: Icon,
+  variant = "primary",
   style,
   className
 }: PrimaryButtonProps) {
@@ -32,6 +34,10 @@ export default function PrimaryButton({
   };
 
   const isDisabled = disabled || loading;
+  const isPrimary = variant === "primary";
+  const bg = isPrimary ? COLORS.actionBg : COLORS.surface;
+  const border = isPrimary ? "transparent" : COLORS.borderLight;
+  const fg = isPrimary ? COLORS.actionFg : COLORS.textPrimary;
 
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }], width: "100%" }}>
@@ -40,29 +46,30 @@ export default function PrimaryButton({
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         disabled={isDisabled}
-        className={["rounded-2xl items-center justify-center", className].filter(Boolean).join(" ")}
+        className={["rounded-2xl items-center justify-center border", className].filter(Boolean).join(" ")}
         style={[
           {
-            backgroundColor: isDisabled ? COLORS.borderLight : COLORS.primary,
+            backgroundColor: isDisabled ? COLORS.textMuted : bg,
+            borderColor: border,
             paddingVertical: 16,
             paddingHorizontal: 24,
-            shadowColor: !isDisabled ? COLORS.primary : "transparent",
+            shadowColor: !isDisabled && isPrimary ? COLORS.backgroundDark : "transparent",
             shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.4,
-            shadowRadius: 20,
-            elevation: 8,
-            opacity: isDisabled ? 0.6 : 1
+            shadowOpacity: 0.35,
+            shadowRadius: 18,
+            elevation: isPrimary ? 8 : 0,
+            opacity: isDisabled ? 0.5 : 1
           },
           style
         ]}
       >
         <View className="flex-row items-center justify-center gap-2">
           {loading ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={fg} size="small" />
           ) : (
             <>
-              {Icon && <Icon color="#fff" size={20} />}
-              <Text className="text-base font-bold text-white" style={{ fontFamily: "Inter-Bold" }}>
+              {Icon && <Icon color={fg} size={20} />}
+              <Text className="text-base font-bold" style={{ color: fg, fontFamily: "Inter-Bold" }}>
                 {title}
               </Text>
             </>

@@ -291,13 +291,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)"
+    borderBottomColor: "rgba(255,255,255,0.12)"
   },
   headerTitle: { flex: 1, color: "#FFFFFF", fontSize: 18, fontFamily: "Inter-Bold" },
   body: { paddingHorizontal: 20, paddingTop: 18, gap: 22 },
   section: { gap: 8 },
   sectionTitle: { color: COLORS.textSecondary, fontSize: 13, fontFamily: "Inter-Bold", textTransform: "uppercase", letterSpacing: 0.5 },
-  card: { backgroundColor: "rgba(24,24,27,0.72)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", paddingHorizontal: 16, paddingVertical: 6 },
+  card: { backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", paddingHorizontal: 16, paddingVertical: 6 },
   sessionRow: { paddingVertical: 10, gap: 6 },
   rowTitle: { color: "#FFFFFF", fontSize: 14, fontFamily: "Inter-Regular" },
   rowValue: { color: COLORS.textSecondary, fontSize: 12.5, fontFamily: "Inter-Regular" },

@@ -46,6 +46,7 @@ interface NativeVpnBlockerInterface {
   invalidateGeneration(): Promise<{ ok: boolean; generation: number; state: string }>;
   getStatus(): Promise<VpnBlockerStatus>;
   stop(): Promise<{ ok: boolean }>;
+  logTrace(message: string): void;
 }
 
 const NativeModule: NativeVpnBlockerInterface | undefined = NativeModules.VpnBlocker;
@@ -182,16 +183,30 @@ class VpnBlockerService {
     }
   }
 
+  trace(message: string): void {
+    if (Platform.OS === "android" && NativeModule) {
+      try {
+        NativeModule.logTrace(message);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
   addStateListener(listener: (event: VpnBlockerEvent) => void): () => void {
     if (!this.emitter) {
       return () => {};
     }
     const sub = this.emitter.addListener("VpnBlockerStateChange", (raw: any) => {
+      const evtGeneration = Number(raw.generation ?? 0);
+      if (evtGeneration > 0) {
+        this.currentGeneration = evtGeneration;
+      }
       listener({
         state: raw.state as VpnState,
         tunnelUp: Boolean(raw.tunnelUp),
         authExpiresAt: Number(raw.authExpiresAt ?? 0),
-        generation: Number(raw.generation ?? 0),
+        generation: evtGeneration,
       });
     });
     return () => sub.remove();

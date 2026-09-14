@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { AuthProvider } from "../contexts/AuthContext";
 import { ConnectionProvider } from "../contexts/ConnectionContext";
 import { LicenseProvider } from "../contexts/LicenseContext";
+import { COLORS } from "../constants/theme";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -26,14 +27,14 @@ export default function RootLayout() {
 
   return (
     <>
-      <StatusBar style="light" backgroundColor="#09090B" />
+      <StatusBar style="light" backgroundColor={COLORS.background} />
       <AuthProvider>
         <LicenseProvider>
           <ConnectionProvider>
             <Stack
               screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: "#09090B" },
+                contentStyle: { backgroundColor: COLORS.background },
                 animation: "fade",
                 animationDuration: 300
               }}

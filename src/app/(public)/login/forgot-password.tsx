@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, Animated, Pressable, KeyboardAvoidingView, Platform, ScrollView, TextInput } from "react-native";
+import { View, Text, Animated, Pressable, KeyboardAvoidingView, Platform, ScrollView, TextInput, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { Mail, ArrowLeft, Send } from "lucide-react-native";
 import PrimaryButton from "../../../components/PrimaryButton";
@@ -38,14 +38,12 @@ export default function ForgotPasswordScreen() {
 
   if (sent) {
     return (
-      <Animated.View className="flex-1 bg-[#09090B] items-center justify-center px-8" style={{ opacity: fadeAnim }}>
-        <View className="w-20 h-20 rounded-2xl items-center justify-center mb-6" style={{ backgroundColor: `${COLORS.success}15`, borderWidth: 1.5, borderColor: `${COLORS.success}30` }}>
+      <Animated.View style={[styles.sentScreen, { opacity: fadeAnim }]}>
+        <View style={styles.sentIcon}>
           <Send color={COLORS.success} size={32} />
         </View>
-        <Text className="text-2xl font-bold text-white text-center mb-2" style={{ fontFamily: "Inter-Bold" }}>
-          Email envoyé
-        </Text>
-        <Text className="text-zinc-400 text-base text-center mb-8" style={{ fontFamily: "Inter-Regular" }}>
+        <Text style={styles.sentTitle}>Email envoyé</Text>
+        <Text style={styles.sentText}>
           Si un compte existe avec cette adresse, vous recevrez un email de réinitialisation.
         </Text>
         <PrimaryButton title="Retour à la connexion" onPress={() => router.back()} />
@@ -54,33 +52,31 @@ export default function ForgotPasswordScreen() {
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-[#09090B]">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 56, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Animated.View style={{ opacity: fadeAnim }}>
-          <Pressable onPress={() => router.back()} className="mb-8 flex-row items-center gap-2">
+          <Pressable onPress={() => router.back()} style={styles.backRow}>
             <ArrowLeft color={COLORS.textSecondary} size={18} />
-            <Text className="text-zinc-400 text-sm" style={{ fontFamily: "Inter-Regular" }}>Retour</Text>
+            <Text style={styles.backText}>Retour</Text>
           </Pressable>
 
-          <View className="mb-8">
-            <Text className="text-3xl font-bold text-white mb-2" style={{ fontFamily: "Inter-Bold" }}>
-              Mot de passe oublié
-            </Text>
-            <Text className="text-zinc-400 text-base" style={{ fontFamily: "Inter-Regular" }}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Mot de passe oublié</Text>
+            <Text style={styles.headerSub}>
               Saisissez votre email pour recevoir un lien de réinitialisation
             </Text>
           </View>
 
-          <View className="gap-5">
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Email</Text>
-              <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: error ? COLORS.danger : COLORS.border }}>
+          <View style={{ gap: 18 }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Email</Text>
+              <View style={[styles.field, { borderColor: error ? COLORS.danger : COLORS.borderLight }]}>
                 <Mail color={COLORS.textMuted} size={18} />
-                <TextInput value={email} onChangeText={setEmail} placeholder="jean.dupont@email.com" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} keyboardType="email-address" autoCapitalize="none" />
+                <TextInput value={email} onChangeText={setEmail} placeholder="jean.dupont@email.com" placeholderTextColor={COLORS.textMuted} style={styles.input} keyboardType="email-address" autoCapitalize="none" accessibilityLabel="Adresse email" />
               </View>
             </View>
 
-            {error ? <Text className="text-xs text-red-400 mx-1" style={{ fontFamily: "Inter-Regular" }}>{error}</Text> : null}
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
             <PrimaryButton title="Envoyer le lien" onPress={handleReset} loading={loading} icon={Send} />
           </View>
@@ -89,3 +85,40 @@ export default function ForgotPasswordScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
+  scroll: { paddingHorizontal: 32, paddingTop: 56, paddingBottom: 48 },
+  backRow: { marginBottom: 32, flexDirection: "row", alignItems: "center", gap: 8 },
+  backText: { color: COLORS.textSecondary, fontSize: 14, fontFamily: "Inter-Regular" },
+  header: { marginBottom: 32 },
+  headerTitle: { color: COLORS.textPrimary, fontSize: 28, fontFamily: "Inter-Bold", marginBottom: 6 },
+  headerSub: { color: COLORS.textSecondary, fontSize: 15, fontFamily: "Inter-Regular" },
+  label: { color: COLORS.textSecondary, fontSize: 14, marginLeft: 4, fontFamily: "Inter-Regular" },
+  field: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    height: 56,
+    backgroundColor: "rgba(255,255,255,0.12)"
+  },
+  input: { flex: 1, color: COLORS.textPrimary, fontSize: 15, fontFamily: "Inter-Regular" },
+  errorText: { color: COLORS.danger, fontSize: 12, marginHorizontal: 4, fontFamily: "Inter-Regular" },
+  sentScreen: { flex: 1, backgroundColor: COLORS.background, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  sentIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 24,
+    backgroundColor: `${COLORS.success}15`,
+    borderWidth: 1.5,
+    borderColor: `${COLORS.success}30`
+  },
+  sentTitle: { color: COLORS.textPrimary, fontSize: 22, fontFamily: "Inter-Bold", textAlign: "center", marginBottom: 8 },
+  sentText: { color: COLORS.textSecondary, fontSize: 15, textAlign: "center", marginBottom: 32, fontFamily: "Inter-Regular" }
+});

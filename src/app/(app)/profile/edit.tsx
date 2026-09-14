@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, ScrollView, Pressable, KeyboardAvoidingView, Platform, Animated, TextInput } from "react-native";
+import { View, Text, ScrollView, Pressable, KeyboardAvoidingView, Platform, Animated, TextInput, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { ArrowLeft, User, Mail, Phone, Save } from "lucide-react-native";
 import PrimaryButton from "../../../components/PrimaryButton";
@@ -36,60 +36,56 @@ export default function EditProfileScreen() {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-[#09090B]">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 56, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Animated.View style={{ opacity: fadeAnim }}>
-          <Pressable onPress={() => router.back()} className="mb-6 flex-row items-center gap-2">
+          <Pressable onPress={() => router.back()} style={styles.backRow}>
             <ArrowLeft color={COLORS.textSecondary} size={18} />
-            <Text className="text-zinc-400 text-sm" style={{ fontFamily: "Inter-Regular" }}>Retour</Text>
+            <Text style={styles.backText}>Retour</Text>
           </Pressable>
 
-          <View className="mb-8">
-            <Text className="text-3xl font-bold text-white mb-2" style={{ fontFamily: "Inter-Bold" }}>
-              Modifier le profil
-            </Text>
-            <Text className="text-zinc-400 text-base" style={{ fontFamily: "Inter-Regular" }}>
-              Mettez à jour vos informations personnelles
-            </Text>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Modifier le profil</Text>
+            <Text style={styles.headerSub}>Mettez à jour vos informations personnelles</Text>
           </View>
 
-            <View className="gap-4">
-              {error ? (
-                <View className="p-3 rounded-2xl" style={{ backgroundColor: "rgba(239, 68, 68, 0.1)", borderWidth: 1, borderColor: "rgba(239, 68, 68, 0.3)" }}>
-                  <Text className="text-xs text-red-400" style={{ fontFamily: "Inter-Regular" }}>{error}</Text>
-                </View>
-              ) : null}
+          <View style={{ gap: 14 }}>
+            {error ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
 
-              <View className="flex-row gap-3">
-              <View className="flex-1 gap-2">
-                <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Prénom</Text>
-                <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+            <View style={styles.row}>
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={styles.label}>Prénom</Text>
+                <View style={styles.field}>
                   <User color={COLORS.textMuted} size={18} />
-                  <TextInput value={firstName} onChangeText={setFirstName} placeholder="Prénom" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} />
+                  <TextInput value={firstName} onChangeText={setFirstName} placeholder="Prénom" placeholderTextColor={COLORS.textMuted} style={styles.input} accessibilityLabel="Prénom" />
                 </View>
               </View>
-              <View className="flex-1 gap-2">
-                <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Nom</Text>
-                <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={styles.label}>Nom</Text>
+                <View style={styles.field}>
                   <User color={COLORS.textMuted} size={18} />
-                  <TextInput value={lastName} onChangeText={setLastName} placeholder="Nom" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} />
+                  <TextInput value={lastName} onChangeText={setLastName} placeholder="Nom" placeholderTextColor={COLORS.textMuted} style={styles.input} accessibilityLabel="Nom" />
                 </View>
               </View>
             </View>
 
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Email</Text>
-              <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Email</Text>
+              <View style={styles.field}>
                 <Mail color={COLORS.textMuted} size={18} />
-                <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} keyboardType="email-address" autoCapitalize="none" />
+                <TextInput value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={COLORS.textMuted} style={styles.input} keyboardType="email-address" autoCapitalize="none" accessibilityLabel="Adresse email" />
               </View>
             </View>
 
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Téléphone</Text>
-              <View className="flex-row items-center gap-3 rounded-2xl px-4 border h-14" style={{ backgroundColor: COLORS.card, borderColor: COLORS.border }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Téléphone</Text>
+              <View style={styles.field}>
                 <Phone color={COLORS.textMuted} size={18} />
-                <TextInput value={phone} onChangeText={setPhone} placeholder="+33 6 12 34 56 78" placeholderTextColor={COLORS.textMuted} className="flex-1 text-white text-base" style={{ fontFamily: "Inter-Regular" }} keyboardType="phone-pad" />
+                <TextInput value={phone} onChangeText={setPhone} placeholder="+33 6 12 34 56 78" placeholderTextColor={COLORS.textMuted} style={styles.input} keyboardType="phone-pad" accessibilityLabel="Téléphone" />
               </View>
             </View>
 
@@ -100,3 +96,35 @@ export default function EditProfileScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
+  scroll: { paddingHorizontal: 24, paddingTop: 56, paddingBottom: 48 },
+  backRow: { marginBottom: 24, flexDirection: "row", alignItems: "center", gap: 8 },
+  backText: { color: COLORS.textSecondary, fontSize: 14, fontFamily: "Inter-Regular" },
+  header: { marginBottom: 24 },
+  headerTitle: { color: COLORS.textPrimary, fontSize: 28, fontFamily: "Inter-Bold", marginBottom: 6 },
+  headerSub: { color: COLORS.textSecondary, fontSize: 15, fontFamily: "Inter-Regular" },
+  errorBox: {
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.3)"
+  },
+  errorText: { color: COLORS.danger, fontSize: 12, fontFamily: "Inter-Regular" },
+  label: { color: COLORS.textSecondary, fontSize: 14, marginLeft: 4, fontFamily: "Inter-Regular" },
+  field: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    height: 56,
+    backgroundColor: "rgba(255,255,255,0.12)"
+  },
+  input: { flex: 1, color: COLORS.textPrimary, fontSize: 15, fontFamily: "Inter-Regular" },
+  row: { flexDirection: "row", gap: 10 }
+});

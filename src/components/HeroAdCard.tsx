@@ -1,67 +1,124 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { View, Text, Image, StyleSheet, ActivityIndicator, Pressable } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { Video, ResizeMode } from "expo-av";
-import { Megaphone, Zap, ShieldCheck, Sparkles, type LucideIcon } from "lucide-react-native";
+import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import {
+  Megaphone,
+  Zap,
+  ShieldCheck,
+  Sparkles,
+  AlertTriangle,
+  Play,
+  Pause,
+  RefreshCw,
+  type LucideIcon,
+} from "lucide-react-native";
 import { COLORS } from "../constants/theme";
 import { useConnection } from "../contexts/ConnectionContext";
 
 const AD_ICONS: Record<string, LucideIcon> = {
   NordVPN: ShieldCheck,
+  "Partenaire Démo": Zap,
 };
 
+const localDemoVideo = require("../../assets/demo-ad.mp4");
+
 /**
- * HeroAdCard — Lecteur publicitaire obligatoire.
+ * HeroAdCard — Lecteur publicitaire interactif.
  *
- * La publicité doit être regardée jusqu'au bout. Le bouton de fermeture
- * n'existe PAS pendant la lecture : il n'apparaît qu'après complétion.
- * La récompense n'est jamais accordée par le téléphone, uniquement par
- * la Edge Function complete-ad-view (voir ConnectionContext.finalizeAdView).
+ * Utilise les événements réels du lecteur expo-av (chargement, lecture, pause, fin, erreur).
+ * En écran partagé :
+ * - Lecture active (isPlaying = true) -> autorisation VPN activée (Chrome charge)
+ * - Pause (isPlaying = false) -> blocage VPN immédiat (Chrome bloqué)
+ * - Reprise -> autorisation VPN réactivée
+ * - Fin -> validation de session et quota décompté
  */
 export default function HeroAdCard() {
-  const { currentAd, state, adProgress, connect, internetStatus } = useConnection();
+  const {
+    currentAd,
+    state,
+    adProgress,
+    adIsPlaying,
+    adBuffering,
+    lastError,
+    connect,
+    pauseSession,
+    internetStatus,
+    vpnStatus,
+    handlePlaybackStatusUpdate,
+    handleAdMediaError,
+  } = useConnection();
+
   const [mediaFailed, setMediaFailed] = useState(false);
-  const [buffering, setBuffering] = useState(false);
+  const [isPlayingRequested, setIsPlayingRequested] = useState(true);
 
   const isWatching = state === "ad_active" || state === "ad_loading";
   const completed = state === "wifi_active" || state === "authorizing_wifi";
+  const isConnected = state === "wifi_active";
+  // La publicité reste à l'écran (visible + en lecture) tant qu'on regarde
+  // OU qu'une session démo validée la maintient à l'écran.
+  const adOnScreen = isWatching || (completed && Boolean(currentAd));
 
-  // Réinitialiser les erreurs média quand une nouvelle pub arrive.
+  // Mode boucle actif dès que la session démo est autorisée (connectée OU
+  // en pause volontaire). Stable durant pause/reprise : la boucle ne démarre
+  // donc qu'à la validation de la première lecture, jamais à chaque reprise.
+  const loopMode = state === "wifi_active" || state === "paused";
+
+  // Réinitialiser les erreurs média et la demande de lecture quand une nouvelle pub arrive.
   useEffect(() => {
     setMediaFailed(false);
-    setBuffering(false);
-  }, [currentAd?.id]);
+    if (state === "ad_active") {
+      setIsPlayingRequested(true);
+    }
+  }, [currentAd?.id, state]);
 
-  // Publiques : si aucune pub en cours, afficher un état "aucune pub disponible".
+  // Si aucune pub disponible et aucune lecture en cours :
   if (!currentAd && !isWatching && !completed) {
     return (
       <View style={[styles.card, styles.emptyCard]}>
-        <LinearGradient colors={["#1A1012", "#3A1216"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        <LinearGradient
+          colors={["#1A1012", "#3A1216"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
         <View style={styles.emptyIcon}>
-          <Megaphone color={COLORS.danger} size={26} />
+          {lastError ? (
+            <AlertTriangle color={COLORS.warning} size={28} />
+          ) : (
+            <Megaphone color={COLORS.danger} size={26} />
+          )}
         </View>
-        <Text style={styles.warnTitle}>Aucune publicité disponible</Text>
-        <Text style={styles.warnDesc}>
-          Aucune campagne active pour le moment. La connexion reste interrompue.
+        <Text style={styles.warnTitle}>
+          {lastError ? "Rapport d'erreur connexion" : "Aucune publicité disponible"}
         </Text>
-        {internetStatus !== "active" && (
-          <Text style={styles.emptyHint}>Contactez votre gestionnaire de site.</Text>
-        )}
+        <Text style={styles.warnDesc}>
+          {lastError ?? "Aucune campagne active pour le moment. La connexion reste interrompue."}
+        </Text>
+        <Pressable onPress={connect} style={styles.retryButton}>
+          <RefreshCw color="#FFFFFF" size={16} />
+          <Text style={styles.retryText}>Vérifier à nouveau</Text>
+        </Pressable>
       </View>
     );
   }
 
+  // Écran après complétion
   if (!currentAd && (isWatching || completed)) {
-    // Transition après complétion
     return (
       <View style={[styles.card, styles.emptyCard]}>
-        <LinearGradient colors={["#0B3B1F", "#0E5A2E"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        <LinearGradient
+          colors={["#0B3B1F", "#0E5A2E"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
         <View style={styles.emptyIcon}>
           <Sparkles color={COLORS.success} size={26} />
         </View>
-        <Text style={styles.warnTitle}>Publicité terminée</Text>
+        <Text style={styles.warnTitle}>Publicité validée</Text>
         <Text style={styles.warnDesc}>
-          Votre connexion a été financée. Vous êtes en ligne.
+          Votre connexion a été autorisée. Le trafic Internet est débloqué.
         </Text>
       </View>
     );
@@ -69,7 +126,9 @@ export default function HeroAdCard() {
 
   if (!currentAd) {
     return (
-      <PressableLoading onPress={connect} />
+      <Pressable onPress={connect} style={styles.loadingButton}>
+        <Text style={styles.loadingText}>Regarder la pub et se connecter</Text>
+      </Pressable>
     );
   }
 
@@ -79,10 +138,33 @@ export default function HeroAdCard() {
   const BrandIcon = AD_ICONS[currentAd.advertiserName] ?? Zap;
   const progressPercent = Math.round((adProgress || 0) * 100);
 
+  const togglePlayback = () => {
+    if (isWatching) {
+      setIsPlayingRequested((prev) => !prev);
+      return;
+    }
+    if (isConnected) {
+      if (adIsPlaying) {
+        setIsPlayingRequested(false);
+        void pauseSession();
+      } else {
+        setIsPlayingRequested(true);
+        void connect();
+      }
+      return;
+    }
+    void connect();
+  };
+
   return (
     <View style={styles.wrap}>
       <View style={styles.card}>
-        <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        <LinearGradient
+          colors={gradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
 
         {mediaFailed ? (
           <View style={styles.mediaFallback}>
@@ -92,20 +174,26 @@ export default function HeroAdCard() {
           <AdMedia
             key={currentAd.id}
             ad={currentAd}
-            onError={() => setMediaFailed(true)}
-            onBuffer={() => setBuffering(true)}
-            onReady={() => setBuffering(false)}
+            shouldPlay={adOnScreen && isPlayingRequested}
+            isLooping={loopMode}
+            onError={() => {
+              setMediaFailed(true);
+              void handleAdMediaError("Échec de lecture du média publicitaire");
+            }}
+            onPlaybackStatusUpdate={(status) => {
+              void handlePlaybackStatusUpdate(status);
+            }}
           />
         )}
 
-        {buffering && (
+        {adBuffering && (
           <View style={styles.bufferOverlay}>
             <ActivityIndicator color="#FFFFFF" size="large" />
           </View>
         )}
 
         <LinearGradient
-          colors={["rgba(0,0,0,0.2)", "rgba(0,0,0,0.6)"]}
+          colors={["rgba(0,0,0,0.3)", "rgba(0,0,0,0.65)"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 0, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -123,11 +211,50 @@ export default function HeroAdCard() {
                 {currentAd.advertiserName}
               </Text>
             </View>
+            {adOnScreen && (
+              <View style={styles.badgeRow}>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    {
+                      backgroundColor:
+                        vpnStatus?.state === "ALLOWED" && internetStatus === "active"
+                          ? "rgba(16, 185, 129, 0.3)"
+                          : "rgba(245, 158, 11, 0.3)",
+                    },
+                  ]}
+                >
+                  <Text style={styles.statusBadgeText}>
+                    {vpnStatus?.state === "ALLOWED" && internetStatus === "active"
+                      ? "Accès autorisé"
+                      : "Accès suspendu"}
+                  </Text>
+                </View>
+                {state === "wifi_active" && (
+                  <View style={[styles.statusBadge, { backgroundColor: "rgba(99, 102, 241, 0.3)" }]}>
+                    <Text style={styles.statusBadgeText}>
+                      {adIsPlaying ? "Lecture active" : "Lecture en pause"}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
-          <View style={styles.creative}>
-            <View style={styles.creativeIcon}>
-              <BrandIcon color="#FFFFFF" size={30} strokeWidth={1.8} />
+          <Pressable onPress={togglePlayback} style={styles.creative}>
+            <View style={styles.centerControlWrap}>
+              <View style={styles.creativeIcon}>
+                <BrandIcon color="#FFFFFF" size={28} strokeWidth={1.8} />
+              </View>
+              {adOnScreen && (
+                <View style={styles.playPauseOverlay}>
+                  {adIsPlaying ? (
+                    <Pause color="#FFFFFF" size={28} />
+                  ) : (
+                    <Play color="#FFFFFF" size={28} fill="#FFFFFF" />
+                  )}
+                </View>
+              )}
             </View>
             <Text style={styles.title} numberOfLines={2}>
               {currentAd.title}
@@ -135,25 +262,34 @@ export default function HeroAdCard() {
             {currentAd.advertiserName && (
               <Text style={styles.brand}>{currentAd.advertiserName}</Text>
             )}
-          </View>
+          </Pressable>
 
           <View style={styles.footer}>
             <View style={styles.fundingRow}>
-              <Sparkles color="#FFD166" size={13} />
+              <Sparkles color="#FFFFFF" size={13} />
               <Text style={styles.fundingText}>
-                {isWatching
-                  ? "Regardez toute la publicité pour vous connecter"
-                  : "Cette publicité a financé votre connexion"}
+                {adOnScreen
+                  ? adIsPlaying
+                    ? "Lecture en cours — Appuyez pour mettre en pause"
+                    : "En pause — Appuyez pour reprendre la lecture"
+                  : "Appuyez sur « Regarder » pour débloquer la connexion"}
               </Text>
             </View>
-            <View style={styles.track}>
-              <View style={[styles.trackFill, { width: `${progressPercent}%` }]} />
-            </View>
-            {isWatching && (
-              <Text style={styles.timerText}>
-                {Math.max(0, Math.ceil((currentAd.durationSeconds * (1 - (adProgress || 0)))))}
-                {" s"}
-              </Text>
+
+            {adOnScreen ? (
+              <>
+                <View style={styles.track}>
+                  <View style={[styles.trackFill, { width: `${progressPercent}%` }]} />
+                </View>
+                <Text style={styles.timerText}>
+                  {Math.max(0, Math.ceil(currentAd.durationSeconds * (1 - (adProgress || 0))))} s restantes
+                </Text>
+              </>
+            ) : (
+              <Pressable onPress={connect} style={styles.startAdButton}>
+                <Play color={COLORS.actionFg} size={16} fill={COLORS.actionFg} />
+                <Text style={styles.startAdText}>Regarder la pub et se connecter</Text>
+              </Pressable>
             )}
           </View>
         </View>
@@ -162,41 +298,68 @@ export default function HeroAdCard() {
   );
 }
 
-function PressableLoading({ onPress }: { onPress: () => Promise<void> }) {
-  return (
-    <Pressable onPress={onPress} style={styles.loadingButton}>
-      <Text style={styles.loadingText}>Regarder la pub et se connecter</Text>
-    </Pressable>
-  );
-}
-
 function AdMedia({
   ad,
+  shouldPlay,
+  isLooping = false,
   onError,
-  onBuffer,
-  onReady,
+  onPlaybackStatusUpdate,
 }: {
-  ad: { type: "image" | "video"; mediaUrl: string };
+  ad: { id?: string; type: "image" | "video"; mediaUrl: string };
+  shouldPlay: boolean;
+  isLooping?: boolean;
   onError: () => void;
-  onBuffer: () => void;
-  onReady: () => void;
+  onPlaybackStatusUpdate: (status: AVPlaybackStatus) => void;
 }) {
+  const videoRef = useRef<Video>(null);
+
+  // Stratégie déclarative : shouldPlay pilote la lecture/pause. Aucune
+  // remise à zéro systématique à chaque reprise : on reprend là où l'on était.
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (shouldPlay) {
+      videoRef.current.playAsync().catch(() => {});
+    } else {
+      videoRef.current.pauseAsync().catch(() => {});
+    }
+  }, [shouldPlay]);
+
+  // Entrée dans LA boucle de maintien (validation de la première lecture).
+  // isLooping ne change qu'à cette jonction (stable durant pause/reprise),
+  // donc ce n'est pas une remise à zéro à chaque reprise mais le démarrage
+  // explicite de la boucle après validation serveur.
+  useEffect(() => {
+    if (isLooping && shouldPlay && videoRef.current) {
+      videoRef.current.setPositionAsync(0).then(() => videoRef.current?.playAsync()).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLooping]);
+
   if (ad.type === "video") {
+    const isDemo = ad.id === "demo-campaign-video";
+    const source = isDemo ? localDemoVideo : { uri: ad.mediaUrl };
+
     return (
       <Video
-        source={{ uri: ad.mediaUrl }}
+        ref={videoRef}
+        source={source}
         style={StyleSheet.absoluteFill}
         resizeMode={ResizeMode.COVER}
-        shouldPlay
-        isLooping
-        isMuted
+        shouldPlay={shouldPlay}
+        isLooping={isLooping}
+        isMuted={true}
         useNativeControls={false}
         onError={onError}
-        onLoadStart={onBuffer}
-        onLoad={onReady}
+        onLoad={() => {
+          if (shouldPlay) {
+            videoRef.current?.playAsync().catch(() => {});
+          }
+        }}
+        onPlaybackStatusUpdate={onPlaybackStatusUpdate}
       />
     );
   }
+
   return (
     <Image
       source={{ uri: ad.mediaUrl }}
@@ -208,7 +371,7 @@ function AdMedia({
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, minHeight: 240 },
+  wrap: { flex: 1, minHeight: 250 },
   card: {
     flex: 1,
     borderRadius: 28,
@@ -219,121 +382,167 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 14 },
     shadowOpacity: 0.5,
     shadowRadius: 28,
-    elevation: 18
+    elevation: 18,
   },
-  emptyCard: { paddingHorizontal: 28, alignItems: "center", justifyContent: "center" },
+  emptyCard: { paddingHorizontal: 24, alignItems: "center", justifyContent: "center" },
   emptyIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(239, 68, 68, 0.16)",
     borderWidth: 1,
     borderColor: "rgba(239, 68, 68, 0.35)",
-    marginBottom: 18
+    marginBottom: 14,
   },
-  warnTitle: { color: "#FFFFFF", fontSize: 20, fontFamily: "Inter-Bold" },
+  warnTitle: { color: "#FFFFFF", fontSize: 18, fontFamily: "Inter-Bold", textAlign: "center" },
   warnDesc: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 13,
-    lineHeight: 19,
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12.5,
+    lineHeight: 18,
     textAlign: "center",
-    marginTop: 8,
-    fontFamily: "Inter-Regular"
+    marginTop: 6,
+    marginBottom: 14,
+    fontFamily: "Inter-Regular",
   },
-  emptyHint: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 12,
-    marginTop: 12,
-    fontFamily: "Inter-Regular"
+  retryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
   },
+  retryText: { color: "#FFFFFF", fontSize: 13, fontFamily: "Inter-Bold" },
   mediaFallback: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.4)"
+    backgroundColor: "rgba(0,0,0,0.4)",
   },
   bufferOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.3)"
+    backgroundColor: "rgba(0,0,0,0.3)",
   },
-  content: { flex: 1, padding: 18 },
+  content: { flex: 1, padding: 16, justifyContent: "space-between" },
   topRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  badgeRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   pubBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.16)"
+    backgroundColor: "rgba(255,255,255,0.16)",
   },
   pubText: {
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1,
-    fontFamily: "Inter-Bold"
+    fontFamily: "Inter-Bold",
   },
   advertiserChip: {
     flex: 1,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.22)"
+    backgroundColor: "rgba(0,0,0,0.22)",
   },
   advertiserText: {
     color: "rgba(255,255,255,0.92)",
     fontSize: 11,
-    fontFamily: "Inter-Regular"
+    fontFamily: "Inter-Regular",
   },
-  creative: { flex: 1, justifyContent: "center", paddingHorizontal: 6 },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  statusBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10.5,
+    fontFamily: "Inter-Bold",
+  },
+  creative: { flex: 1, justifyContent: "center", paddingHorizontal: 4, paddingVertical: 8 },
+  centerControlWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 8,
+  },
   creativeIcon: {
-    width: 62,
-    height: 62,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.14)",
-    marginBottom: 16
   },
-  title: { color: "#FFFFFF", fontSize: 26, lineHeight: 32, fontFamily: "Inter-Bold" },
+  playPauseOverlay: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.4)",
+  },
+  title: { color: "#FFFFFF", fontSize: 22, lineHeight: 28, fontFamily: "Inter-Bold" },
   brand: {
     color: "rgba(255,255,255,0.7)",
-    fontSize: 13,
-    marginTop: 4,
-    fontFamily: "Inter-Regular"
+    fontSize: 12,
+    marginTop: 3,
+    fontFamily: "Inter-Regular",
   },
-  footer: { marginTop: 14 },
-  fundingRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 9 },
+  footer: { marginTop: 8 },
+  fundingRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
   fundingText: {
     color: "rgba(255,255,255,0.85)",
     fontSize: 11,
-    fontFamily: "Inter-Regular"
+    fontFamily: "Inter-Regular",
   },
   track: {
     height: 6,
     borderRadius: 3,
     backgroundColor: "rgba(255,255,255,0.18)",
-    overflow: "hidden"
+    overflow: "hidden",
   },
-  trackFill: { height: "100%", borderRadius: 3, backgroundColor: "#FFD166" },
+  trackFill: { height: "100%", borderRadius: 3, backgroundColor: "#FFFFFF" },
   timerText: {
-    color: "#FFD166",
-    fontSize: 12,
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 11.5,
     fontFamily: "Inter-Bold",
-    marginTop: 6,
-    textAlign: "center"
+    marginTop: 4,
+    textAlign: "center",
   },
+  startAdButton: {
+    height: 44,
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: COLORS.actionBg,
+    marginTop: 4,
+  },
+  startAdText: { color: COLORS.actionFg, fontSize: 14, fontFamily: "Inter-Bold" },
   loadingButton: {
     height: 56,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: COLORS.primary
+    backgroundColor: COLORS.actionBg,
   },
-  loadingText: { color: "#FFFFFF", fontSize: 15.5, fontFamily: "Inter-Bold" }
+  loadingText: { color: COLORS.actionFg, fontSize: 15.5, fontFamily: "Inter-Bold" },
 });

@@ -28,9 +28,9 @@ export default function GlassCard({ children, style, pressable = false, onPress,
     <Animated.View
       style={[
         {
-          backgroundColor: "rgba(24, 24, 27, 0.6)",
+          backgroundColor: "rgba(255, 255, 255, 0.12)",
           borderWidth: 1,
-          borderColor: pressed ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)",
+          borderColor: pressed ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.14)",
           borderRadius: RADIUS.xl,
           padding: 20,
           shadowColor: "#000",

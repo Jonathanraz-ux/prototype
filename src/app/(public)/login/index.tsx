@@ -7,13 +7,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  TextInput
+  TextInput,
+  StyleSheet
 } from "react-native";
 import { useRouter } from "expo-router";
-import { Mail, Lock, ArrowRight, Wifi } from "lucide-react-native";
+import { Mail, Lock, ArrowRight } from "lucide-react-native";
 import PrimaryButton from "../../../components/PrimaryButton";
+import BojoLogo from "../../../components/BojoLogo";
 import { COLORS } from "../../../constants/theme";
 import { useAuth } from "../../../contexts/AuthContext";
+import { isProduction } from "../../../lib/config";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,6 +27,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const showDemoFill = !isProduction();
 
   useEffect(() => {
     Animated.parallel([
@@ -50,115 +54,84 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      className="flex-1 bg-[#09090B]"
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.screen}>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 56, paddingBottom: 48 }}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
-          <Pressable onPress={() => router.back()} className="mb-6 flex-row items-center">
-            <Text className="text-zinc-400 text-sm" style={{ fontFamily: "Inter-Regular" }}>
-              Retour
-            </Text>
+          <Pressable onPress={() => router.back()} style={styles.backRow}>
+            <Text style={styles.backText}>Retour</Text>
           </Pressable>
 
-          <View className="items-center mb-8">
-            <View
-              className="w-16 h-16 rounded-2xl items-center justify-center mb-4"
-              style={{
-                backgroundColor: `${COLORS.primary}15`,
-                borderWidth: 1.5,
-                borderColor: `${COLORS.primary}40`
-              }}
-            >
-              <Wifi color={COLORS.primary} size={28} />
-            </View>
-            <Text
-              className="text-3xl font-bold text-white mb-1"
-              style={{ fontFamily: "Inter-Bold" }}
-            >
-              Bon retour
-            </Text>
-            <Text
-              className="text-zinc-400 text-base text-center"
-              style={{ fontFamily: "Inter-Regular" }}
-            >
-              Connectez-vous à votre compte WiFi Zone
-            </Text>
+          <View style={styles.logoWrap}>
+            <BojoLogo width={220} showTagline={true} />
+            <Text style={styles.logoSub}>Connectez-vous à votre compte Bôjô</Text>
           </View>
 
-          <View className="gap-5">
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Email</Text>
-              <View
-                className="flex-row items-center gap-3 rounded-2xl px-4 border h-14"
-                style={{ backgroundColor: COLORS.card, borderColor: error ? COLORS.danger : COLORS.border }}
-              >
+          <View style={{ gap: 18 }}>
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Email</Text>
+              <View style={[styles.field, { borderColor: error ? COLORS.danger : COLORS.borderLight }]}>
                 <Mail color={COLORS.textMuted} size={18} />
                 <TextInput
                   value={email}
                   onChangeText={setEmail}
                   placeholder="jean.dupont@email.com"
                   placeholderTextColor={COLORS.textMuted}
-                  className="flex-1 text-white text-base"
-                  style={{ fontFamily: "Inter-Regular" }}
+                  style={styles.input}
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  accessibilityLabel="Adresse email"
                 />
               </View>
             </View>
 
-            <View className="gap-2">
-              <Text className="text-sm text-zinc-300 ml-1" style={{ fontFamily: "Inter-Regular" }}>Mot de passe</Text>
-              <View
-                className="flex-row items-center gap-3 rounded-2xl px-4 border h-14"
-                style={{ backgroundColor: COLORS.card, borderColor: error ? COLORS.danger : COLORS.border }}
-              >
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Mot de passe</Text>
+              <View style={[styles.field, { borderColor: error ? COLORS.danger : COLORS.borderLight }]}>
                 <Lock color={COLORS.textMuted} size={18} />
                 <TextInput
                   value={password}
                   onChangeText={setPassword}
                   placeholder="Entrez votre mot de passe"
                   placeholderTextColor={COLORS.textMuted}
-                  className="flex-1 text-white text-base"
-                  style={{ fontFamily: "Inter-Regular" }}
+                  style={styles.input}
                   secureTextEntry
+                  accessibilityLabel="Mot de passe"
                 />
               </View>
             </View>
 
             {error ? (
-              <Text className="text-xs text-red-400 mx-1" style={{ fontFamily: "Inter-Regular" }}>
-                {error}
-              </Text>
+              <Text style={styles.errorText}>{error}</Text>
             ) : null}
 
-            <Pressable onPress={() => router.push("/(public)/login/forgot-password")} className="self-end">
-              <Text className="text-sm" style={{ color: COLORS.accent, fontFamily: "Inter-Regular" }}>
-                Mot de passe oublié ?
-              </Text>
+            <Pressable onPress={() => router.push("/(public)/login/forgot-password")} style={{ alignSelf: "flex-end" }}>
+              <Text style={styles.forgotText}>Mot de passe oublié ?</Text>
             </Pressable>
 
-            <PrimaryButton
-              title="Se connecter"
-              onPress={handleLogin}
-              loading={loading}
-              icon={ArrowRight}
-            />
+            <PrimaryButton title="Se connecter" onPress={handleLogin} loading={loading} icon={ArrowRight} />
+
+            {showDemoFill && (
+              <Pressable
+                onPress={() => {
+                  setEmail("demo@wifizone.app");
+                  setPassword("Password123!");
+                }}
+                style={({ pressed }) => [styles.demoButton, { opacity: pressed ? 0.7 : 1 }]}
+              >
+                <Text style={styles.demoTitle}>Remplir avec le compte de test démo</Text>
+                <Text style={styles.demoSub}>demo@wifizone.app • Password123!</Text>
+              </Pressable>
+            )}
           </View>
 
-          <View className="flex-row justify-center mt-8">
-            <Text className="text-zinc-500" style={{ fontFamily: "Inter-Regular" }}>
-              Pas encore de compte ?{" "}
-            </Text>
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Pas encore de compte ?{" "}</Text>
             <Pressable onPress={() => router.push("/(public)/register")}>
-              <Text className="font-semibold" style={{ color: COLORS.accent, fontFamily: "Inter-Bold" }}>
-                S'inscrire
-              </Text>
+              <Text style={styles.footerLink}>S'inscrire</Text>
             </Pressable>
           </View>
         </Animated.View>
@@ -166,3 +139,41 @@ export default function LoginScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
+  scroll: { paddingHorizontal: 32, paddingTop: 56, paddingBottom: 48 },
+  backRow: { marginBottom: 24 },
+  backText: { color: COLORS.textSecondary, fontSize: 14, fontFamily: "Inter-Regular" },
+  logoWrap: { alignItems: "center", marginBottom: 32 },
+  logoSub: { color: COLORS.textSecondary, fontSize: 14, textAlign: "center", marginTop: 14, fontFamily: "Inter-Regular" },
+  label: { color: COLORS.textSecondary, fontSize: 14, marginLeft: 4, fontFamily: "Inter-Regular" },
+  field: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    height: 56,
+    backgroundColor: "rgba(255,255,255,0.12)"
+  },
+  input: { flex: 1, color: COLORS.textPrimary, fontSize: 15, fontFamily: "Inter-Regular" },
+  errorText: { color: COLORS.danger, fontSize: 12, marginHorizontal: 4, fontFamily: "Inter-Regular" },
+  forgotText: { color: COLORS.accent, fontSize: 14, fontFamily: "Inter-Regular" },
+  demoButton: {
+    marginTop: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    backgroundColor: COLORS.surface,
+    alignItems: "center"
+  },
+  demoTitle: { color: COLORS.textPrimary, fontSize: 12, fontFamily: "Inter-Bold" },
+  demoSub: { color: COLORS.textMuted, fontSize: 10, marginTop: 3, fontFamily: "Inter-Regular" },
+  footer: { flexDirection: "row", justifyContent: "center", marginTop: 32 },
+  footerText: { color: COLORS.textMuted, fontFamily: "Inter-Regular" },
+  footerLink: { color: COLORS.accent, fontFamily: "Inter-Bold" }
+});

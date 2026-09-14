@@ -3,7 +3,13 @@ import { View, Platform, Text, StyleSheet, Pressable } from "react-native";
 import Animated, { useAnimatedStyle, withTiming, withSpring } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { COLORS } from "../../../constants/theme";
-import { Home, Megaphone, User, type LucideIcon } from "lucide-react-native";
+import {
+  Home,
+  Compass,
+  History,
+  User,
+  type LucideIcon
+} from "lucide-react-native";
 import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 
 const SPRING = { damping: 16, stiffness: 180, mass: 0.6 };
@@ -14,9 +20,13 @@ type TabDef = {
   Icon: LucideIcon;
 };
 
+// Seuls les onglets réellement déclarés ci-dessous existent sous (tabs).
+// C'est la correction de la cause des icônes manquantes : plus aucune
+// route "fantôme" auto-enregistrée sans icône déclarée.
 const TABS: TabDef[] = [
   { routeName: "dashboard", label: "Accueil", Icon: Home },
-  { routeName: "ads", label: "Publicités", Icon: Megaphone },
+  { routeName: "browse", label: "Naviguer", Icon: Compass },
+  { routeName: "history", label: "Historique", Icon: History },
   { routeName: "profile", label: "Profil", Icon: User }
 ];
 
@@ -44,7 +54,7 @@ function TabIcon({ Icon, focused }: { Icon: LucideIcon; focused: boolean }) {
     <View style={styles.iconSlot}>
       <Animated.View style={[styles.pill, pillStyle]} />
       <Icon
-        color={focused ? "#FFFFFF" : COLORS.textSecondary}
+        color={focused ? COLORS.actionFg : COLORS.textSecondary}
         size={22}
         strokeWidth={focused ? 2.4 : 2}
       />
@@ -55,7 +65,7 @@ function TabIcon({ Icon, focused }: { Icon: LucideIcon; focused: boolean }) {
 function Label({ text, focused }: { text: string; focused: boolean }) {
   return (
     <Text
-      style={[styles.label, { color: focused ? COLORS.accentSoft : COLORS.textMuted }]}
+      style={[styles.label, { color: focused ? COLORS.textPrimary : COLORS.textMuted }]}
       numberOfLines={1}
     >
       {text}
@@ -96,10 +106,10 @@ const styles = StyleSheet.create({
     right: 18,
     bottom: Platform.OS === "ios" ? 22 : 16,
     height: Platform.OS === "ios" ? 76 : 70,
-    backgroundColor: "rgba(21, 21, 24, 0.94)",
+    backgroundColor: "rgba(58, 9, 150, 0.96)",
     borderTopWidth: 0,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.14)",
     borderRadius: 26,
     paddingTop: 8,
     paddingBottom: Platform.OS === "ios" ? 12 : 8,
@@ -125,9 +135,9 @@ const styles = StyleSheet.create({
     width: 48,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "rgba(255, 138, 0, 0.16)",
+    backgroundColor: "rgba(255, 255, 255, 0.94)",
     borderWidth: 1,
-    borderColor: "rgba(255, 138, 0, 0.35)"
+    borderColor: "rgba(255, 255, 255, 0.2)"
   },
   label: {
     fontSize: 10.5,

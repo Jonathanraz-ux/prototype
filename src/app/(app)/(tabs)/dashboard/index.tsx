@@ -1,16 +1,16 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { View, Text, Animated, Pressable, ActivityIndicator, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { COLORS, GRADIENTS } from "../../../../constants/theme";
+import { COLORS } from "../../../../constants/theme";
 import { useAuth } from "../../../../contexts/AuthContext";
 import { useConnection } from "../../../../contexts/ConnectionContext";
-import { Play, Power, AlertTriangle, ServerCog } from "lucide-react-native";
+import { Play, Power, AlertTriangle, ServerCog, Wrench } from "lucide-react-native";
 import HeroAdCard from "../../../../components/HeroAdCard";
 import ConnectionStatusCard from "../../../../components/ConnectionStatusCard";
+import AppHeader from "../../../../components/AppHeader";
 import RefreshButton from "../../../../components/RefreshButton";
-import AndroidVpnDemoCard from "../../../../components/AndroidVpnDemoCard";
+import { isDevModeEnabled } from "../../../../lib/config";
 import { ScrollView } from "react-native";
 
 export default function DashboardScreen() {
@@ -34,6 +34,7 @@ export default function DashboardScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const devEnabled = isDevModeEnabled();
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 450, useNativeDriver: true }).start();
@@ -61,13 +62,12 @@ export default function DashboardScreen() {
   const percent = usage.totalQuotaMB > 0 ? (usage.remainingQuotaMB / usage.totalQuotaMB) * 100 : 0;
 
   const renderAction = () => {
-    // Publicité en cours de lecture obligatoire : aucun bouton.
     if (
       state === "ad_loading" ||
       state === "ad_active" ||
       state === "authorizing_wifi" ||
       state === "disconnecting" ||
-      currentAd
+      (state === "idle" && currentAd)
     ) {
       return null;
     }
@@ -88,10 +88,9 @@ export default function DashboardScreen() {
       return (
         <Pressable
           onPress={handleConnect}
-          style={({ pressed }) => [styles.alertButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
+          style={({ pressed }) => [styles.actionButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
         >
-          <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-          <Text style={styles.alertButtonText}>Reprendre la session</Text>
+          <Text style={styles.actionButtonText}>Reprendre la session</Text>
         </Pressable>
       );
     }
@@ -107,10 +106,9 @@ export default function DashboardScreen() {
           </View>
           <Pressable
             onPress={() => void refillQuota()}
-            style={({ pressed }) => [styles.alertButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
+            style={({ pressed }) => [styles.actionButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
           >
-            <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-            <Text style={styles.alertButtonText}>Vérifier le quota</Text>
+            <Text style={styles.actionButtonText}>Vérifier le quota</Text>
           </Pressable>
         </View>
       );
@@ -121,20 +119,19 @@ export default function DashboardScreen() {
         onPress={handleConnect}
         disabled={isConnecting}
         style={({ pressed }) => [
-          styles.connectWrap,
+          styles.actionButton,
           {
             opacity: isConnecting ? 0.85 : 1,
             transform: [{ scale: pressed && !isConnecting ? 0.98 : 1 }]
           }
         ]}
       >
-        <LinearGradient colors={GRADIENTS.accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
         {isConnecting ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
+          <ActivityIndicator size="small" color={COLORS.actionFg} />
         ) : (
           <>
-            <Play color="#FFFFFF" size={20} fill="#FFFFFF" />
-            <Text style={styles.connectText}>Regarder la pub et se connecter</Text>
+            <Play color={COLORS.actionFg} size={20} fill={COLORS.actionFg} />
+            <Text style={styles.actionButtonText}>Regarder la pub et se connecter</Text>
           </>
         )}
       </Pressable>
@@ -163,23 +160,11 @@ export default function DashboardScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Animated.View style={{ gap: 14, opacity: fadeAnim }}>
-          <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title} numberOfLines={1}>
-                Bonjour <Text style={{ color: COLORS.accentSoft }}>{user?.firstName ?? ""}</Text>
-              </Text>
-              <Text style={styles.subtitle}>Connexion financée par la publicité</Text>
-              {state !== "idle" && <Text style={styles.subtitle}>{stateLabel}</Text>}
-              {reasonLabel && <Text style={styles.reason}>{reasonLabel}</Text>}
-            </View>
-            <RefreshButton refreshing={isRefreshing} onPress={handleRefresh} />
-          </View>
-
-          <AndroidVpnDemoCard />
-
-          <View style={{ height: 260 }}>
-            <HeroAdCard />
-          </View>
+          <AppHeader
+            title={`Bonjour ${user?.firstName ?? ""}`}
+            subtitle="Connexion financée par la publicité"
+            right={<RefreshButton refreshing={isRefreshing} onPress={handleRefresh} />}
+          />
 
           <ConnectionStatusCard
             connected={isActive}
@@ -193,15 +178,32 @@ export default function DashboardScreen() {
             lastSyncAt={lastSyncAt}
           />
 
+          <View style={{ height: 260 }}>
+            <HeroAdCard />
+          </View>
+
+          {state !== "idle" && <Text style={styles.stateNote}>{stateLabel}</Text>}
+          {reasonLabel && <Text style={styles.reason}>{reasonLabel}</Text>}
+
           {renderAction()}
 
           {(isAdmin || isSiteManager) && (
             <Pressable
               onPress={() => router.push("/(app)/admin" as never)}
-              style={({ pressed }) => [styles.adminLink, { opacity: pressed ? 0.7 : 1 }]}
+              style={({ pressed }) => [styles.link, { opacity: pressed ? 0.7 : 1 }]}
             >
               <ServerCog color={COLORS.textSecondary} size={16} />
-              <Text style={styles.adminLinkText}>Espace administrateur</Text>
+              <Text style={styles.linkText}>Espace administrateur</Text>
+            </Pressable>
+          )}
+
+          {devEnabled && (
+            <Pressable
+              onPress={() => router.push("/(app)/dev")}
+              style={({ pressed }) => [styles.link, { opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Wrench color={COLORS.textSecondary} size={16} />
+              <Text style={styles.linkText}>Espace de développement</Text>
             </Pressable>
           )}
         </Animated.View>
@@ -213,25 +215,23 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
   container: { flex: 1, paddingHorizontal: 20, paddingBottom: 104, gap: 14 },
-  header: { flexDirection: "row", alignItems: "center", gap: 16 },
-  title: { color: "#FFFFFF", fontSize: 27, lineHeight: 34, fontFamily: "Inter-Bold" },
-  subtitle: { color: COLORS.textSecondary, fontSize: 13, marginTop: 2, fontFamily: "Inter-Regular" },
-  reason: { color: COLORS.warning, fontSize: 12, marginTop: 2, fontFamily: "Inter-Regular" },
-  connectWrap: {
+  stateNote: { color: COLORS.textMuted, fontSize: 12.5, textAlign: "center", fontFamily: "Inter-Regular" },
+  reason: { color: COLORS.warning, fontSize: 12, textAlign: "center", fontFamily: "Inter-Regular" },
+  actionButton: {
     height: 56,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     gap: 10,
-    overflow: "hidden",
-    shadowColor: "#FF7A00",
+    backgroundColor: COLORS.actionBg,
+    shadowColor: COLORS.backgroundDark,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.45,
     shadowRadius: 20,
     elevation: 10
   },
-  connectText: { color: "#FFFFFF", fontSize: 15.5, fontFamily: "Inter-Bold" },
+  actionButtonText: { color: COLORS.actionFg, fontSize: 15.5, fontFamily: "Inter-Bold" },
   disconnectButton: {
     height: 56,
     borderRadius: 18,
@@ -254,15 +254,7 @@ const styles = StyleSheet.create({
   },
   alertRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   alertText: { flex: 1, color: COLORS.warning, fontSize: 13, fontFamily: "Inter-Regular" },
-  alertButton: {
-    height: 46,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden"
-  },
-  alertButtonText: { color: "#FFFFFF", fontSize: 14, fontFamily: "Inter-Bold" },
-  adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
-  adminLinkText: { color: COLORS.textSecondary, fontSize: 13, fontFamily: "Inter-Regular" },
-  skeleton: { backgroundColor: COLORS.card }
+  link: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  linkText: { color: COLORS.textSecondary, fontSize: 13, fontFamily: "Inter-Regular" },
+  skeleton: { backgroundColor: COLORS.surface }
 });

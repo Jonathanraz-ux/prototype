@@ -16,7 +16,7 @@ const TAG = "net:android-vpn";
  * Dans ce mode :
  * - Aucun routeur physique MikroTik ni agent local n'est requis.
  * - L'application contrôle localement l'accès Internet des autres applications via VpnBlocker.
- * - WiFi Zone conserve son accès réseau (exclu via addDisallowedApplication).
+ * - Bôjô conserve son accès réseau (exclu via addDisallowedApplication).
  * - L'état ALLOWED retire le tunnel TUN, BLOCKED établit le tunnel de capture.
  */
 export class AndroidVpnDemoAdapter implements NetworkAccessAdapter {
@@ -37,7 +37,7 @@ export class AndroidVpnDemoAdapter implements NetworkAccessAdapter {
     return "READY";
   }
 
-  async authorizeSession(input: AuthorizeSessionInput): Promise<AuthorizeSessionResult> {
+  async authorizeSession(_input: AuthorizeSessionInput): Promise<AuthorizeSessionResult> {
     if (!vpnBlocker.isAvailable()) {
       return {
         success: false,
@@ -55,21 +55,15 @@ export class AndroidVpnDemoAdapter implements NetworkAccessAdapter {
       };
     }
 
-    // Le TTL est borné (ex. 30s max par battement)
-    const ttlMs = Math.min((input.allocatedSeconds || 30) * 1000, 30000);
-    const res = await vpnBlocker.setAuthorized(ttlMs);
-    if (!res.ok) {
-      return {
-        success: false,
-        health: "ERROR",
-        reason: res.reason ?? "Échec de l'autorisation native.",
-      };
-    }
-
-    const reference = `vpn-demo-${Date.now()}-${res.generation}`;
+    // Ce chemin n'autorise JAMAIS le trafic par lui-même : l'autorisation
+    // native n'est accordée qu'après une validation serveur explicite
+    // (request_demo_wifi_session / heartbeat) effectuée par ConnectionContext.
+    // Ici on refuse (état BLOCKED) plutôt que de débloquer sans preuve serveur.
+    await vpnBlocker.setAuthorized(0);
     return {
-      success: true,
-      reference,
+      success: false,
+      health: "ERROR",
+      reason: "Autorisation native subordonnée à une validation serveur.",
     };
   }
 

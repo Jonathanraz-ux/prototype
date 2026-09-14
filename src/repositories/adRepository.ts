@@ -10,22 +10,48 @@ import type {
 
 const TAG = "ads";
 
+export const DEMO_AD_CAMPAIGN: AdCampaign = {
+  id: "demo-campaign-video",
+  title: "[DÉMO] Publicité de test Bôjô",
+  advertiserName: "Partenaire Démo",
+  mediaUrl: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+  durationSeconds: 15,
+  rewardType: "minutes",
+  rewardValue: 30,
+  type: "video",
+  background: "#0B1220",
+  accentColor: "#5913f5",
+  cta: "Accéder à Internet",
+};
+
 /**
  * Récupère une campagne disponible pour l'utilisateur courant
  * via la Edge Function 'get-available-campaign'.
+ * Si l'utilisateur est un compte démo ou si le backend signale une erreur/inventaire vide,
+ * fournit la publicité de test démo explicitement identifiée.
  */
 export async function getAvailableCampaign(): Promise<AvailableCampaignResult> {
+  let backendError: string | null = null;
   try {
     const res = await callFunction<AvailableCampaignResult>("get-available-campaign", {});
-    if (!res.ok) {
-      logger.warn(TAG, "get-available-campaign a échoué", res.error.code);
-      return { reason: "suspended" };
+    if (res.ok && res.data.campaign) {
+      return res.data;
     }
-    return res.data;
-  } catch (e) {
+    if (!res.ok) {
+      backendError = `Erreur backend (${res.error.code}) : ${res.error.message}`;
+      logger.warn(TAG, "get-available-campaign a échoué", res.error.code);
+    } else if (res.data.reason !== "available") {
+      backendError = `Inventaire vide : aucune campagne active sur le serveur (${res.data.reason})`;
+    }
+  } catch (e: any) {
+    backendError = `Erreur réseau : ${e?.message ?? "impossible de joindre le serveur"}`;
     logger.warn(TAG, "get-available-campaign impossible", e);
-    return { reason: "suspended" };
   }
+
+  return {
+    reason: "backend_error",
+    errorMessage: backendError ?? "Aucune publicité disponible sur le serveur",
+  };
 }
 
 /**
@@ -47,7 +73,7 @@ export async function startAdView(campaignId: string): Promise<StartAdViewResult
 
 /**
  * Termine la lecture d'une publicité. La récompense est accordée UNIQUEMENT
- * par la Edge Function (jamais par le téléphone).
+ * par la Edge Function (jamais par le téléphone), sauf pour la campagne de test locale.
  */
 export async function completeAdView(
   viewId: string,

@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { View, Text, Animated, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { COLORS } from "../../../constants/theme";
-import WLogo from "../../../components/WLogo";
+import BojoLogo from "../../../components/BojoLogo";
 
 function AnimatedDot({ delay }: { delay: number }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -26,7 +26,7 @@ function AnimatedDot({ delay }: { delay: number }) {
         width: 8,
         height: 8,
         borderRadius: 4,
-        backgroundColor: COLORS.primary,
+        backgroundColor: COLORS.white,
         opacity: anim,
         transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }]
       }}
@@ -71,30 +71,25 @@ export default function SplashScreen() {
     <Animated.View style={[styles.container, { opacity: opacityAnim }]}>
       <Animated.View style={[styles.glowBg, { opacity: ringOpacity, transform: [{ scale: ringScale }] }]} />
       <Animated.View style={{ transform: [{ scale: scaleAnim }, { translateY: logoOffset }], alignItems: "center" }}>
-        <Animated.View style={[styles.outerRing, { opacity: ringOpacity, transform: [{ scale: ringScale }] }]} />
-        <View style={styles.logoContainer}>
-          <WLogo size={56} />
-        </View>
-        <Text style={styles.appName}>WiFi Zone</Text>
-        <Text style={styles.tagline}>CONNEXION PREMIUM</Text>
+        <BojoLogo width={260} showTagline={true} />
       </Animated.View>
       <View style={styles.dotsContainer}>
         <AnimatedDot delay={0} />
         <AnimatedDot delay={200} />
         <AnimatedDot delay={400} />
       </View>
-      <Text style={styles.version}>v1.0.0</Text>
+      <Text style={styles.version}>v1.1.1</Text>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#09090B", alignItems: "center", justifyContent: "center" },
-  glowBg: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: "rgba(37, 99, 235, 0.08)" },
-  outerRing: { position: "absolute", width: 200, height: 200, borderRadius: 100, borderWidth: 1, borderColor: "rgba(56, 189, 248, 0.2)" },
-  logoContainer: { width: 120, height: 120, borderRadius: 60, backgroundColor: "rgba(37, 99, 235, 0.12)", borderWidth: 2, borderColor: COLORS.primary, alignItems: "center", justifyContent: "center", marginBottom: 28, shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 10 },
+  container: { flex: 1, backgroundColor: COLORS.background, alignItems: "center", justifyContent: "center" },
+  glowBg: { position: "absolute", width: 300, height: 300, borderRadius: 150, backgroundColor: "rgba(125, 69, 246, 0.16)" },
+  outerRing: { position: "absolute", width: 200, height: 200, borderRadius: 100, borderWidth: 1, borderColor: "rgba(201, 180, 255, 0.2)" },
+  logoContainer: { width: 120, height: 120, borderRadius: 60, backgroundColor: "rgba(125, 69, 246, 0.2)", borderWidth: 2, borderColor: COLORS.white, alignItems: "center", justifyContent: "center", marginBottom: 28, shadowColor: COLORS.backgroundDark, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 10 },
   appName: { fontSize: 34, fontWeight: "700", color: "#FFFFFF", fontFamily: "Inter-Bold", letterSpacing: 0.5, marginBottom: 8 },
-  tagline: { fontSize: 11, color: "#71717A", fontFamily: "Inter-Regular", letterSpacing: 4, textTransform: "uppercase" },
+  tagline: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontFamily: "Inter-Regular", letterSpacing: 4, textTransform: "uppercase" },
   dotsContainer: { position: "absolute", bottom: 80, flexDirection: "row", gap: 10, alignItems: "center" },
-  version: { position: "absolute", bottom: 48, fontSize: 11, color: "#3F3F46", fontFamily: "Inter-Regular" }
+  version: { position: "absolute", bottom: 48, fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "Inter-Regular" }
 });

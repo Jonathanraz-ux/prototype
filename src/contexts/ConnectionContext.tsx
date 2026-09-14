@@ -37,6 +37,11 @@ import type { AdCampaign } from "../types";
 import { registerDevice } from "../repositories/deviceRepository";
 import { resolveNetworkAdapter, type NetworkMode } from "../network";
 import { getConfig } from "../lib/config";
+import {
+  heartbeatTtlMsFromServer,
+  watchedSecondsFromDurationMillis,
+  resumeQuotaDecision,
+} from "../lib/serverAuth";
 import { uuidV4 } from "../lib/uuid";
 import { logger } from "../lib/logger";
 import { vpnBlocker, type VpnBlockerStatus } from "../services/vpnBlocker";
@@ -54,6 +59,7 @@ const HEARTBEAT_INTERVAL_MS = 10000;
 const QUOTA_POLL_INTERVAL_MS = 8000;
 const AUTHORIZE_TIMEOUT_MS = 15000;
 const NATIVE_AUTH_TTL_MS = 25000;
+const AD_LOAD_TIMEOUT_MS = 20000;
 
 export interface ConnectionContextValue {
   state: ConnectionState;
@@ -64,6 +70,10 @@ export interface ConnectionContextValue {
   reasonLabel: string | undefined;
   activeSession: WifiSession | null;
   adProgress: number;
+  adIsPlaying: boolean;
+  adBuffering: boolean;
+  adError: string | null;
+  lastError: string | null;
   networkHealth: string;
   currentAd: AdCampaign | null;
   lastSyncAt: string | null;
@@ -76,7 +86,10 @@ export interface ConnectionContextValue {
   exitDemoMode: () => Promise<void>;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
+  pauseSession: () => Promise<void>;
   refillQuota: () => Promise<void>;
+  handlePlaybackStatusUpdate: (status: any) => Promise<void>;
+  handleAdMediaError: (error: string) => Promise<void>;
 }
 
 const ConnectionContext = createContext<ConnectionContextValue | undefined>(undefined);
@@ -134,6 +147,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [disconnectReason, setDisconnectReason] = useState<DisconnectReason | undefined>();
   const [activeSession, setActiveSession] = useState<WifiSession | null>(null);
   const [adProgress, setAdProgress] = useState(0);
+  const [adIsPlaying, setAdIsPlaying] = useState(false);
+  const [adBuffering, setAdBuffering] = useState(false);
+  const [adError, setAdError] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
   const [networkHealth, setNetworkHealth] = useState("NOT_CONFIGURED");
   const [currentAd, setCurrentAd] = useState<AdCampaign | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
@@ -147,7 +164,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const sessionTokenRef = useRef<string | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const viewingRef = useRef<{ viewId: string; campaignId: string } | null>(null);
+  const onLoadTracedRef = useRef<string>("");
   const disposedRef = useRef(false);
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumeFromPausedRef = useRef<() => Promise<void>>(async () => {});
 
   const networkAdapter = useMemo(() => resolveNetworkAdapter(networkMode), [networkMode]);
   const defaultSiteId = getConfig().EXPO_PUBLIC_DEFAULT_SITE_ID;
@@ -167,6 +187,47 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     });
   }, []);
 
+  const clearLoadingTimer = useCallback(() => {
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = null;
+    }
+  }, []);
+
+  const startLoadingTimer = useCallback(() => {
+    clearLoadingTimer();
+    loadingTimerRef.current = setTimeout(() => {
+      loadingTimerRef.current = null;
+      if (networkModeRef.current === "android_vpn_demo") {
+        vpnBlocker.blockNow().catch(() => {});
+      }
+      setLastError("Le contenu publicitaire n'a pas pu se charger en temps voulu.");
+      setInternetStatus("cut");
+      setState("idle");
+    }, AD_LOAD_TIMEOUT_MS);
+  }, [clearLoadingTimer]);
+
+  // Nettoyage du timer de chargement au démontage : aucune fuite vers un nouvel essai.
+  useEffect(() => {
+    return () => clearLoadingTimer();
+  }, [clearLoadingTimer]);
+
+  const loadAvailableAd = useCallback(async () => {
+    try {
+      const available = await getAvailableCampaign();
+      if (available.reason === "available" && available.campaign) {
+        setCurrentAd(available.campaign);
+        setLastError(null);
+      } else {
+        setCurrentAd(null);
+        setLastError(available.errorMessage ?? "Aucune campagne publicitaire disponible");
+      }
+    } catch (e: any) {
+      setCurrentAd(null);
+      setLastError(e?.message ?? "Erreur lors du chargement de la campagne");
+    }
+  }, [user?.email, user?.id]);
+
   // Écoute des changements d'état du VpnService natif
   useEffect(() => {
     if (networkMode !== "android_vpn_demo") return;
@@ -175,7 +236,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     const unsub = vpnBlocker.addStateListener((evt) => {
       setVpnStatus((prev) => ({
         consentGranted: prev?.consentGranted ?? true,
-        serviceRunning: prev?.serviceRunning ?? true,
+        serviceRunning: true,
         state: evt.state,
         tunnelUp: evt.tunnelUp,
         generation: evt.generation,
@@ -265,6 +326,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     disposedRef.current = false;
     registerDevice().then((r) => logger.info(TAG, "Device enregistré", r.status));
     refreshUsage();
+    loadAvailableAd();
 
     if (networkMode === "android_vpn_demo") {
       vpnBlocker.getStatus().then((status) => {
@@ -275,7 +337,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, networkMode]);
+  }, [user?.id, networkMode, loadAvailableAd]);
 
   // ————————————————————————————————————————————————————————
   // Battement publicitaire (maintient la session en vie côté serveur)
@@ -303,11 +365,36 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
           setInternetStatus("cut");
           setState((prev) => (prev === "wifi_active" || prev === "paused" ? "idle" : prev));
         } else if (r.outcome === "ok" && stateRef.current === "wifi_active" && isVpnDemo) {
-          // Renouvelle l'échéance native sur horloge monotone
-          await vpnBlocker.setAuthorized(NATIVE_AUTH_TTL_MS);
+          // Renouvellement natif UNIQUEMENT sur confirmation serveur courante,
+          // durée dérivée des DATES SERVEUR (jamais extension locale aveugle).
+          const ttlMs = heartbeatTtlMsFromServer(r);
+          if (ttlMs <= 0) {
+            // Échéance serveur absente/illisible/passée → AUCUNE autorisation.
+            vpnBlocker.trace(`heartbeat EXPIRY-UNUSABLE ttlMs=0 base=${r.server_time ?? r.last_heartbeat_at ?? "-"} until=${r.heartbeat_expires_at ?? "-"} -> block`);
+            await vpnBlocker.blockNow();
+            setInternetStatus("cut");
+            setDisconnectReason("HEARTBEAT_TIMEOUT");
+            setState("idle");
+          } else {
+            vpnBlocker.trace(
+              `heartbeat ok ttlMs=${ttlMs} base=${r.server_time ?? r.last_heartbeat_at ?? "-"} until=${r.heartbeat_expires_at ?? "-"}`
+            );
+            await vpnBlocker.setAuthorized(ttlMs);
+          }
         }
       } catch (e) {
         logger.warn(TAG, "heartbeat impossible", e);
+        // Un heartbeat en erreur ne doit JAMAIS prolonger l'autorisation
+        // existante. On bloque immédiatement pour ne pas laisser un trafic
+        // « autorisé mais périmé » entre l'échec et l'expiration native.
+        if (isVpnDemo) {
+          vpnBlocker.trace(`heartbeat FAILED -> block + invalidate generation`);
+          await vpnBlocker.blockNow();
+          await vpnBlocker.invalidateGeneration();
+          setInternetStatus("cut");
+          setDisconnectReason("HEARTBEAT_TIMEOUT");
+          setState("idle");
+        }
       }
     };
 
@@ -353,11 +440,9 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
         }
       } else if (prev !== "active" && next === "active") {
         if (stateRef.current === "paused") {
-          if (isVpnDemo && usage.remainingQuotaMB > 0) {
-            await vpnBlocker.setAuthorized(NATIVE_AUTH_TTL_MS);
-          }
-          setState("wifi_active");
-          refreshUsage();
+          // Reprise au premier plan : revalidation serveur obligatoire
+          // (session + même quota), jamais d'autorisation locale aveugle.
+          await resumeFromPausedRef.current();
         }
       }
     });
@@ -371,7 +456,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       await completeAdView(viewId, 0);
       viewingRef.current = null;
     }
-    setCurrentAd(null);
+    setAdIsPlaying(false);
     setAdProgress(0);
     setInternetStatus("cut");
     setState("idle");
@@ -379,6 +464,83 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       await vpnBlocker.blockNow();
     }
   }
+
+  // ————————————————————————————————————————————————————————
+  // Gestionnaire des événements réels du lecteur publicitaire
+  // ————————————————————————————————————————————————————————
+  const handlePlaybackStatusUpdate = useCallback(async (status: any) => {
+    if (!status) return;
+
+    if (!status.isLoaded) {
+      if (status.error) {
+        logger.error(TAG, "Erreur du lecteur vidéo", status.error);
+        setAdError(`Erreur lecture vidéo: ${status.error}`);
+        setLastError(`Erreur vidéo: ${status.error}`);
+        if (networkModeRef.current === "android_vpn_demo") {
+          await vpnBlocker.blockNow();
+        }
+      }
+      return;
+    }
+
+    const { isPlaying, isBuffering, positionMillis, durationMillis, didJustFinish } = status;
+    setAdBuffering(Boolean(isBuffering));
+    setAdIsPlaying(Boolean(isPlaying));
+
+    if (durationMillis && durationMillis > 0) {
+      setAdProgress(Math.min(positionMillis / durationMillis, 1));
+    }
+
+    const isVpnDemo = networkModeRef.current === "android_vpn_demo";
+    const s = stateRef.current;
+
+    if (durationMillis && durationMillis > 0) {
+      clearLoadingTimer();
+    }
+
+    if (isVpnDemo && durationMillis && durationMillis > 0 && onLoadTracedRef.current !== viewingRef.current?.viewId) {
+      onLoadTracedRef.current = viewingRef.current?.viewId ?? "";
+      vpnBlocker.trace(`onLoad view=${viewingRef.current?.viewId ?? "-"} durationMillis=${durationMillis} (${(durationMillis / 1000).toFixed(1)}s) pos=${positionMillis} playing=${isPlaying}`);
+    }
+
+    if (isVpnDemo && isBuffering) {
+      vpnBlocker.trace(`buffering view=${viewingRef.current?.viewId ?? "-"} pos=${positionMillis}`);
+    }
+
+    if (isVpnDemo && s === "wifi_active") {
+      // L'autorisation/renouvellement ne vient JAMAIS du lecteur : uniquement
+      // du heartbeat serveur (source de vérité), pour ne jamais prolonger
+      // localement une validation serveur obsolète. Le lecteur ne fait que
+      // DÉTECTER la pause/le cache pendant la session connectée -> blocage.
+      if (!isPlaying && !didJustFinish) {
+        vpnBlocker.trace(`pause-in-session pos=${positionMillis} -> block`);
+        await vpnBlocker.blockNow();
+      }
+    }
+
+    if (didJustFinish && s === "ad_active") {
+      setAdIsPlaying(false);
+      setAdProgress(1);
+      const viewId = viewingRef.current?.viewId ?? "demo-view";
+      // Temps RÉELLEMENT regardé (plancher, jamais la durée totale du fichier
+      // si elle excède le visionnage). didJustFinish = fin réelle de lecture,
+      // on déclare donc la position atteinte (ms) convertie en secondes.
+      const actualWatchedMs = positionMillis > 0 ? Math.min(positionMillis, durationMillis || positionMillis) : durationMillis || 0;
+      const totalSec = watchedSecondsFromDurationMillis(actualWatchedMs);
+      vpnBlocker.trace(`didJustFinish view=${viewId} watched=${totalSec}s pos=${positionMillis} dur=${durationMillis} -> complete-ad-view`);
+      await finalizeAdView(viewId, totalSec);
+    }
+  }, []);
+
+  const handleAdMediaError = useCallback(async (err: string) => {
+    logger.error(TAG, "Erreur média publicité", err);
+    setAdError(err);
+    setLastError(err);
+    clearLoadingTimer();
+    if (networkModeRef.current === "android_vpn_demo") {
+      await vpnBlocker.blockNow();
+    }
+  }, []);
 
   // ————————————————————————————————————————————————————————
   // Consentement VPN
@@ -397,6 +559,90 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   // ————————————————————————————————————————————————————————
+  // Revalidation serveur au retour de pause / premier plan.
+  // On RE-VÉRIFIE la session + le quota côté serveur avant d'autoriser
+  // le réseau (jamais d'autorisation native aveugle après une pause).
+  // ————————————————————————————————————————————————————————
+  const resumeFromPaused = useCallback(async () => {
+    if (usage.remainingQuotaMB <= 0) {
+      setState("quota_exhausted");
+      setInternetStatus("cut");
+      return;
+    }
+    if (networkModeRef.current === "android_vpn_demo") {
+      const st = await fetchQuotaStatus(defaultSiteId ?? null);
+      const a = st.allocation;
+      if (resumeQuotaDecision(a) !== "ok") {
+        vpnBlocker.trace(`resume-from-paused quota-check FAILED decision=${resumeQuotaDecision(a)} remaining=${a?.remaining_bytes ?? 0}`);
+        await vpnBlocker.blockNow();
+        setDisconnectReason("QUOTA_EXHAUSTED");
+        setInternetStatus("cut");
+        setState("quota_exhausted");
+        setLastError("Quota épuisé.");
+        return;
+      }
+      const siteId = defaultSiteId;
+      const sessionToken =
+        sessionTokenRef.current ?? (sessionTokenRef.current = uuidV4());
+      const req = await requestDemoWifiSession({ siteId, sessionToken });
+      vpnBlocker.trace(
+        `resume-from-paused server-check ok=${req.ok} sessionId=${req.sessionId ?? "-"} status=${req.status ?? "-"} auth=${req.authorizationState ?? "-"} reason=${req.reason ?? "-"}`
+      );
+      if (!req.ok || !req.sessionId) {
+        await vpnBlocker.blockNow();
+        setDisconnectReason("ROUTER_ERROR");
+        setInternetStatus("cut");
+        setState("error");
+        setLastError(req.reason ? `Session expirée: ${req.reason}` : "Session expirée");
+        return;
+      }
+      sessionRef.current = req.sessionId;
+      setActiveSession({
+        id: req.sessionId,
+        status: "active",
+        routerSessionReference: "vpn-demo-local",
+      });
+      // Autorisation native basée sur les DATES SERVEUR (jamais une
+      // valeur fixe locale) : on dérive le TTL de heartbeat_expires_at
+      // renvoyé par request_demo_wifi_session, comme le fait le heartbeat.
+      const ttlFromServer = heartbeatTtlMsFromServer({
+        server_time: req.heartbeatExpiresAt
+          ? new Date(Date.parse(req.heartbeatExpiresAt) - NATIVE_AUTH_TTL_MS).toISOString()
+          : undefined,
+        heartbeat_expires_at: req.heartbeatExpiresAt ?? undefined,
+      });
+      const authTtlMs = ttlFromServer > 0 ? ttlFromServer : NATIVE_AUTH_TTL_MS;
+      const authRes = await vpnBlocker.setAuthorized(authTtlMs);
+      vpnBlocker.trace(`resume-from-paused setAuthorized ok=${authRes.ok} gen=${authRes.generation}`);
+      if (authRes.ok) {
+        refreshUsage();
+        setState("wifi_active");
+        setInternetStatus("active");
+        return;
+      }
+      await vpnBlocker.blockNow();
+      setDisconnectReason("ROUTER_ERROR");
+      setInternetStatus("cut");
+      setState("error");
+      setLastError("Échec d'activation du VPN natif");
+      return;
+    }
+    // Mode MikroTik : re-vérification serveur du quota
+    const st = await fetchQuotaStatus(defaultSiteId ?? null);
+    const a = st.allocation;
+    if (resumeQuotaDecision(a) !== "ok") {
+      setState("quota_exhausted");
+      setInternetStatus("cut");
+      setLastError("Quota épuisé.");
+      return;
+    }
+    setState("wifi_active");
+    setInternetStatus("active");
+  }, [usage.remainingQuotaMB, fetchQuotaStatus, defaultSiteId, refreshUsage]);
+
+  resumeFromPausedRef.current = resumeFromPaused;
+
+  // ————————————————————————————————————————————————————————
   // Connexion : publicité obligatoire puis session Wi-Fi.
   // ————————————————————————————————————————————————————————
   const connect = useCallback(async () => {
@@ -405,24 +651,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     if (s !== "idle" && s !== "quota_exhausted" && s !== "error" && s !== "paused") return;
 
     if (s === "paused") {
-      // Reprise directe
-      if (usage.remainingQuotaMB <= 0) {
-        setState("quota_exhausted");
-        setInternetStatus("cut");
-        return;
-      }
-      if (networkMode === "android_vpn_demo") {
-        const authRes = await vpnBlocker.setAuthorized(NATIVE_AUTH_TTL_MS);
-        if (authRes.ok) {
-          setState("wifi_active");
-          setInternetStatus("active");
-          return;
-        }
-      } else {
-        setState("wifi_active");
-        setInternetStatus("active");
-        return;
-      }
+      await resumeFromPaused();
+      return;
     }
 
     // Si mode démo Android et pas de consentement, demander d'abord
@@ -446,40 +676,43 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       const health = await networkAdapter.healthCheck();
       setNetworkHealth(health);
 
-      const available = await getAvailableCampaign();
-      if (available.reason !== "available" || !available.campaign) {
-        setCurrentAd(null);
-        setState("idle");
-        return;
+      let campaignToUse = currentAd;
+      if (!campaignToUse) {
+        const available = await getAvailableCampaign();
+        if (available.reason !== "available" || !available.campaign) {
+          setCurrentAd(null);
+          setLastError(available.errorMessage ?? "Aucune campagne disponible");
+          setState("idle");
+          return;
+        }
+        campaignToUse = available.campaign;
+        setCurrentAd(campaignToUse);
       }
-      setCurrentAd(available.campaign);
 
-      const started = await startAdView(available.campaign.id);
+      setLastError(null);
+      setAdError(null);
+
+      const started = await startAdView(campaignToUse.id);
       if (!started) {
         setCurrentAd(null);
+        setLastError("Impossible d'initialiser la session de visionnage publicitaire");
         setState("idle");
         return;
       }
-      viewingRef.current = { viewId: started.viewId, campaignId: available.campaign.id };
-      transition(ACTIONS.AD_AVAILABLE);
 
-      const total = available.campaign.durationSeconds;
-      let elapsed = 0;
-      const tick = setInterval(() => {
-        elapsed += 1;
-        setAdProgress(Math.min(elapsed / total, 1));
-        if (elapsed >= total) {
-          clearInterval(tick);
-          finalizeAdView(started.viewId, elapsed);
-        }
-      }, 1000);
-    } catch (e) {
+      viewingRef.current = { viewId: started.viewId, campaignId: campaignToUse.id };
+      vpnBlocker.trace(`start-ad-view id=${started.viewId} campaign=${campaignToUse.id} dur=${campaignToUse.durationSeconds}`);
+      startLoadingTimer();
+      transition(ACTIONS.AD_AVAILABLE);
+      // Le lecteur vidéo déclenchera les événements réels via handlePlaybackStatusUpdate
+    } catch (e: any) {
       logger.warn(TAG, "Connexion impossible", e);
       setCurrentAd(null);
+      setLastError(e?.message ?? "Erreur de connexion");
       setInternetStatus("cut");
       setState("idle");
     }
-  }, [user, transition, networkAdapter, networkMode, requestVpnConsent, usage.remainingQuotaMB]);
+  }, [user, transition, networkAdapter, networkMode, requestVpnConsent, currentAd, resumeFromPaused]);
 
   // ————————————————————————————————————————————————————————
   // Fin de publicité : validation et établissement session
@@ -487,11 +720,16 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   async function finalizeAdView(viewId: string, watchedSeconds: number) {
     const result = await completeAdView(viewId, watchedSeconds);
     viewingRef.current = null;
-    setCurrentAd(null);
+    setAdIsPlaying(false);
+    vpnBlocker.trace(`complete-ad-view view=${viewId} watched=${watchedSeconds}s success=${result.success} reward=${result.rewardGranted} reason=${result.reason ?? "-"}`);
 
     if (!result.success || !result.rewardGranted) {
       setAdProgress(0);
+      setLastError(result.reason ? `Échec validation publicité: ${result.reason}` : "Publicité non validée");
       setState("idle");
+      if (networkModeRef.current === "android_vpn_demo") {
+        await vpnBlocker.blockNow();
+      }
       return;
     }
 
@@ -500,11 +738,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     const isVpnDemo = networkModeRef.current === "android_vpn_demo";
 
     if (isVpnDemo) {
-      // Validation démo Supabase dédiée (pas de file MikroTik ni agent nécessaire)
       const req = await requestDemoWifiSession({
         siteId,
         sessionToken,
       });
+      vpnBlocker.trace(`request_demo_wifi_session ok=${req.ok} outcome=${req.outcome ?? "-"} sessionId=${req.sessionId ?? "-"} status=${req.status ?? "-"} auth=${req.authorizationState ?? "-"} reason=${req.reason ?? "-"}`);
 
       if (!req.ok) {
         if (req.outcome === "quota_exhausted" || req.reason === "quota_exhausted") {
@@ -512,8 +750,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
           setDisconnectReason("QUOTA_EXHAUSTED");
           setInternetStatus("cut");
           setState("quota_exhausted");
+          setLastError("Quota épuisé.");
         } else {
           await vpnBlocker.blockNow();
+          setLastError(req.reason ? `Erreur session: ${req.reason}` : "Session refusée");
           setState("idle");
         }
         return;
@@ -530,10 +770,14 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
         transition(ACTIONS.SESSION_AUTHORIZED);
         setInternetStatus("active");
         setState("wifi_active");
+        // En mode démo, on GARDE la publicité à l'écran (visible + en lecture)
+        // pour maintenir l'accès, conformément au contrat démo.
+        // setCurrentAd(null) est volontairement omis ici.
         refreshUsage();
       } else {
         await vpnBlocker.blockNow();
         setDisconnectReason("ROUTER_ERROR");
+        setLastError("Échec d'activation du VPN natif");
         setInternetStatus("cut");
         setState("error");
       }
@@ -651,10 +895,27 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   // ————————————————————————————————————————————————————————
+  // Pause de session : la publicité est mise en pause, le trafic
+  // est immédiatement bloqué, mais la session serveur reste vivante.
+  // ————————————————————————————————————————————————————————
+  const pauseSession = useCallback(async () => {
+    if (stateRef.current !== "wifi_active") return;
+    clearLoadingTimer();
+    vpnBlocker.trace("pauseSession -> block + invalidate generation");
+    if (networkModeRef.current === "android_vpn_demo") {
+      await vpnBlocker.blockNow();
+      await vpnBlocker.invalidateGeneration();
+    }
+    transition(ACTIONS.PAUSE);
+    setAdIsPlaying(false);
+  }, [transition, clearLoadingTimer]);
+
+  // ————————————————————————————————————————————————————————
   // Déconnexion manuelle.
   // ————————————————————————————————————————————————————————
   const disconnect = useCallback(async () => {
     const sessionId = sessionRef.current;
+    clearLoadingTimer();
     transition(ACTIONS.DISCONNECT);
     if (networkModeRef.current === "android_vpn_demo") {
       await vpnBlocker.blockNow();
@@ -670,14 +931,15 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     setSessionRefAndClear();
     setInternetStatus("cut");
     setAdProgress(0);
+    setAdIsPlaying(false);
     transition(ACTIONS.DISCONNECTED);
-  }, [transition]);
+  }, [transition, clearLoadingTimer]);
 
   const refillQuota = useCallback(async () => {
     const st = await fetchQuotaStatus(defaultSiteId ?? null);
     if (disposedRef.current) return;
     const a = st.allocation;
-    if (a && a.status === "active" && (a.remaining_bytes ?? 0) > 0) {
+    if (resumeQuotaDecision(a) === "ok") {
       setDisconnectReason(undefined);
       setUsage(allocationToUsage(st.allocation));
       setState("idle");
@@ -700,6 +962,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       reasonLabel,
       activeSession,
       adProgress,
+      adIsPlaying,
+      adBuffering,
+      adError,
+      lastError,
       networkHealth,
       currentAd,
       lastSyncAt,
@@ -712,7 +978,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       exitDemoMode,
       connect,
       disconnect,
+      pauseSession,
       refillQuota,
+      handlePlaybackStatusUpdate,
+      handleAdMediaError,
     }),
     [
       state,
@@ -723,6 +992,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       reasonLabel,
       activeSession,
       adProgress,
+      adIsPlaying,
+      adBuffering,
+      adError,
+      lastError,
       networkHealth,
       currentAd,
       lastSyncAt,
@@ -735,7 +1008,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       exitDemoMode,
       connect,
       disconnect,
+      pauseSession,
       refillQuota,
+      handlePlaybackStatusUpdate,
+      handleAdMediaError,
     ]
   );
 

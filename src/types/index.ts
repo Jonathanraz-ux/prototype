@@ -1,5 +1,5 @@
 // ===========================================
-// Types métier de l'application WiFi Zone
+// Types métier de l'application Bôjô
 // Ces types reflètent le schéma Supabase (voir supabase/migrations)
 // ===========================================
 
@@ -104,8 +104,10 @@ export interface AdCampaign {
 
 export interface AvailableCampaignResult {
   campaign?: AdCampaign;
-  reason: "available" | "no_campaign" | "daily_limit" | "cooldown" | "suspended";
+  reason: "available" | "no_campaign" | "daily_limit" | "cooldown" | "suspended" | "backend_error" | "unauthorized";
   nextAvailableAt?: string;
+  errorMessage?: string;
+  isDemo?: boolean;
 }
 
 export interface StartAdViewResult {
@@ -235,8 +237,7 @@ export interface ConnectivityStatus {
 // ===========================================
 export type TabParamList = {
   dashboard: undefined;
+  browse: undefined;
   history: undefined;
-  notifications: undefined;
   profile: undefined;
-  settings: undefined;
 };

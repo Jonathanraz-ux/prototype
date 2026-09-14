@@ -7,21 +7,21 @@ module.exports = {
     extend: {
       colors: {
         dark: {
-          DEFAULT: "#09090B",
-          100: "#09090B",
-          200: "#18181B",
-          300: "#27272A",
-          400: "#3F3F46"
+          DEFAULT: "#5912ED",
+          100: "#5912ED",
+          200: "#4A0EC8",
+          300: "#7D45F6",
+          400: "#3E0CA8"
         },
         primary: {
-          DEFAULT: "#2563EB",
-          50: "#EFF6FF",
-          100: "#DBEAFE",
-          500: "#2563EB",
-          600: "#1D4ED8",
-          700: "#1E40AF"
+          DEFAULT: "#5912ED",
+          50: "#F1EAFE",
+          100: "#E3D6FD",
+          500: "#5912ED",
+          600: "#4A0EC8",
+          700: "#3E0CA8"
         },
-        accent: "#38BDF8",
+        accent: "#C9B4FF",
         success: "#22C55E",
         warning: "#F59E0B",
         danger: "#EF4444"
@@ -31,7 +31,7 @@ module.exports = {
       },
       boxShadow: {
         card: "0 8px 32px rgba(0, 0, 0, 0.4)",
-        glow: "0 0 20px rgba(37, 99, 235, 0.3)"
+        glow: "0 0 20px rgba(89, 18, 237, 0.3)"
       },
       animation: {
         "fade-in": "fadeIn 300ms ease-out",

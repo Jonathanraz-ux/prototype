@@ -1,9 +1,38 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getSupabase } from "../lib/supabase";
 import { callFunction } from "../lib/functions";
 import { logger } from "../lib/logger";
 import type { WifiSession, SessionUsage, ConnectionHistoryItem } from "../types";
 
 const TAG = "sessions";
+const DEMO_QUOTA_STORAGE_KEY = "@wifizone/demo_quota_state";
+const DEMO_TOTAL_QUOTA_BYTES = 5368709120; // 5 GiB
+
+interface DemoQuotaState {
+  quotaBytes: number;
+  consumedBytes: number;
+  activeSessionId?: string;
+  sessionStartedAt?: string;
+}
+
+export async function getLocalDemoQuotaState(): Promise<DemoQuotaState> {
+  const raw = await AsyncStorage.getItem(DEMO_QUOTA_STORAGE_KEY);
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch {}
+  }
+  const initial: DemoQuotaState = {
+    quotaBytes: DEMO_TOTAL_QUOTA_BYTES,
+    consumedBytes: 0,
+  };
+  await AsyncStorage.setItem(DEMO_QUOTA_STORAGE_KEY, JSON.stringify(initial));
+  return initial;
+}
+
+export async function saveLocalDemoQuotaState(st: DemoQuotaState): Promise<void> {
+  await AsyncStorage.setItem(DEMO_QUOTA_STORAGE_KEY, JSON.stringify(st));
+}
 
 // ————————————————————————————————————————————————————————————
 // Formes serveur restituées par les Edge Functions (migration 0008)
@@ -53,12 +82,31 @@ export interface QuotaStatusShape {
 export async function fetchQuotaStatus(
   siteId?: string | null
 ): Promise<QuotaStatusShape> {
-  const res = await callFunction<QuotaStatusShape>("quota-status", { site_id: siteId ?? null });
-  if (!res.ok) {
-    logger.warn(TAG, "quota-status échoué", res.error.code);
-    return {};
+  let serverData: QuotaStatusShape | null = null;
+  let serverOk = false;
+
+  try {
+    const res = await callFunction<QuotaStatusShape>("quota-status", { site_id: siteId ?? null });
+    if (res.ok && res.data) {
+      serverData = res.data;
+      serverOk = true;
+    }
+  } catch (e) {
+    logger.warn(TAG, "quota-status exception", e);
   }
-  return res.data;
+
+  const hasValidAllocation =
+    serverOk &&
+    serverData?.allocation &&
+    (serverData.allocation.quota_bytes ?? 0) > 0;
+
+  if (hasValidAllocation) {
+    return serverData!;
+  }
+
+  if (serverData) return serverData;
+  logger.warn(TAG, "quota-status échoué");
+  return {};
 }
 
 /**
@@ -111,11 +159,13 @@ export async function requestWifiSession(input: {
 export async function adHeartbeat(sessionId: string): Promise<{
   outcome: string;
   server_time?: string;
+  last_heartbeat_at?: string;
   heartbeat_expires_at?: string;
 }> {
   const res = await callFunction<{
     outcome: string;
     server_time?: string;
+    last_heartbeat_at?: string;
     heartbeat_expires_at?: string;
   }>("ad-heartbeat", { session_id: sessionId });
   if (!res.ok) return { outcome: "heartbeat_failed" };
@@ -262,8 +312,8 @@ export async function requestDemoWifiSession(input: {
   });
 
   if (error || !data) {
-    logger.error(TAG, "request_demo_wifi_session rpc failed", error);
-    return { ok: false, reason: error?.message ?? "rpc_error" };
+    logger.warn(TAG, "request_demo_wifi_session rpc failed", error?.message);
+    return { ok: false, reason: error?.message ?? "session_failed" };
   }
 
   const d = data as Record<string, unknown>;
@@ -285,7 +335,9 @@ export async function requestDemoWifiSession(input: {
  * Consommation simulée de quota pour les tests de démonstration.
  * Idempotente, atomique, bornée au quota restant.
  */
-export async function simulateDemoConsumption(bytesToConsume: number): Promise<{
+export async function simulateDemoConsumption(
+  bytesToConsume: number
+): Promise<{
   ok: boolean;
   consumedBytes?: number;
   remainingBytes?: number;
@@ -307,8 +359,8 @@ export async function simulateDemoConsumption(bytesToConsume: number): Promise<{
   });
 
   if (error || !data) {
-    logger.error(TAG, "demo_consume_quota error", error);
-    return { ok: false, reason: error?.message ?? "rpc_error" };
+    logger.warn(TAG, "demo_consume_quota RPC failed", error?.message);
+    return { ok: false, reason: error?.message ?? "quota_failed" };
   }
 
   const d = data as Record<string, unknown>;
@@ -343,8 +395,8 @@ export async function resetDemoQuota(): Promise<{
   });
 
   if (error || !data) {
-    logger.error(TAG, "demo_reset_quota error", error);
-    return { ok: false, reason: error?.message ?? "rpc_error" };
+    logger.warn(TAG, "demo_reset_quota RPC failed", error?.message);
+    return { ok: false, reason: error?.message ?? "reset_failed" };
   }
 
   const d = data as Record<string, unknown>;

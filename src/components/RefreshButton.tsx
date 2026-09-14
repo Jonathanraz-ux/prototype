@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from "react";
-import { Pressable, Animated, Easing, StyleSheet } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { Pressable, Animated, Easing, StyleSheet, View } from "react-native";
 import { RefreshCw } from "lucide-react-native";
-import { GRADIENTS } from "../constants/theme";
+import { COLORS } from "../constants/theme";
 
 interface RefreshButtonProps {
   refreshing: boolean;
@@ -48,16 +47,11 @@ export default function RefreshButton({ refreshing, onPress }: RefreshButtonProp
       style={styles.wrap}
     >
       <Animated.View style={{ transform: [{ scale }] }}>
-        <LinearGradient
-          colors={GRADIENTS.accent}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.circle}
-        >
+        <View style={styles.circle}>
           <Animated.View style={{ transform: [{ rotate }] }}>
-            <RefreshCw color="#FFFFFF" size={19} strokeWidth={2.6} />
+            <RefreshCw color={COLORS.actionFg} size={19} strokeWidth={2.6} />
           </Animated.View>
-        </LinearGradient>
+        </View>
       </Animated.View>
     </Pressable>
   );
@@ -67,11 +61,11 @@ const styles = StyleSheet.create({
   wrap: {
     width: 46,
     height: 46,
-    shadowColor: "#FF7A00",
+    shadowColor: COLORS.backgroundDark,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.35,
     shadowRadius: 14,
-    elevation: 8
+    elevation: 8,
   },
   circle: {
     width: 46,
@@ -79,7 +73,8 @@ const styles = StyleSheet.create({
     borderRadius: 23,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: COLORS.actionBg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)"
-  }
+    borderColor: "rgba(255,255,255,0.55)",
+  },
 });
