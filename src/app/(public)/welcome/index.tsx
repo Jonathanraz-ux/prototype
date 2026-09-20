@@ -5,8 +5,6 @@ import { Wifi, Shield, Zap } from "lucide-react-native";
 import { COLORS } from "../../../constants/theme";
 import BojoLogo from "../../../components/BojoLogo";
 
-import PrimaryButton from "../../../components/PrimaryButton";
-
 const FEATURES = [
   { icon: Zap, label: "Accès instantané", desc: "Connectez-vous en quelques secondes" },
   { icon: Shield, label: "Sécurisé", desc: "Connexion chiffrée et protégée" },
@@ -56,10 +54,12 @@ export default function WelcomeScreen() {
       </Animated.View>
 
       <Animated.View style={[styles.ctaSection, { opacity: buttonAnim, transform: [{ translateY: buttonAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }] }]}>
-        <PrimaryButton
-          title="Commencer"
+        <Pressable
           onPress={() => router.push("/(public)/login")}
-        />
+          style={({ pressed }) => [styles.primaryButton, { opacity: pressed ? 0.9 : 1 }]}
+        >
+          <Text style={styles.primaryButtonText}>Commencer</Text>
+        </Pressable>
 
         <Pressable onPress={() => router.push("/(public)/register")} style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.7 : 1 }]}>
           <Text style={styles.secondaryButtonText}>Créer un compte gratuitement</Text>
@@ -89,6 +89,21 @@ const styles = StyleSheet.create({
   featurePill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
   featureText: { fontSize: 11, color: COLORS.textSecondary, fontFamily: "Inter-Regular" },
   ctaSection: { gap: 12 },
+  primaryButton: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+  },
+  primaryButtonText: {
+    color: "#5912ED",
+    fontSize: 16,
+    fontWeight: "700",
+    fontFamily: "Inter-Bold",
+    letterSpacing: 0.3,
+  },
   secondaryButton: { backgroundColor: "rgba(255,255,255,0.10)", borderRadius: 16, paddingVertical: 16, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" },
   secondaryButtonText: { color: COLORS.textPrimary, fontSize: 15, fontFamily: "Inter-Regular" },
   disclaimer: { textAlign: "center", fontSize: 11, color: COLORS.textMuted, fontFamily: "Inter-Regular", marginTop: 4 },
