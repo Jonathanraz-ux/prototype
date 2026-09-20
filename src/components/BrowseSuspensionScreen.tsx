@@ -21,6 +21,7 @@ const REASON_ICON: Record<BrowseGateReason, React.ReactNode> = {
   no_session: <Play color={COLORS.textPrimary} size={26} fill={COLORS.textPrimary} />,
   preparing_ad: <LoaderCircle color={COLORS.accentSoft} size={26} />,
   authorizing: <Clock color={COLORS.accentSoft} size={26} />,
+  verifying: <LoaderCircle color={COLORS.accentSoft} size={26} />,
   paused: <PauseCircle color={COLORS.accentSoft} size={26} />,
   quota_exhausted: <HardDrive color={COLORS.warning} size={26} />,
   error: <AlertTriangle color={COLORS.warning} size={26} />,

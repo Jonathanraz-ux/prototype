@@ -20,7 +20,7 @@ const ALL_STATES: ConnectionState[] = [
 ];
 
 describe("browseGateDecision", () => {
-  it("suspend sans réseau (transport none), quel que soit l'état", () => {
+  it("suspend sans réseau (transport none) sans tunnel VPN, quel que soit l'état", () => {
     for (const state of ALL_STATES) {
       const r = browseGateDecision({
         state,
@@ -28,7 +28,20 @@ describe("browseGateDecision", () => {
         transport: "none",
         requireWifi: true,
       });
-      expect(r).toEqual({ allowed: false, reason: "offline" });
+      expect(r).toEqual({ allowed: false, reason: "offline", preservePage: false });
+    }
+  });
+
+  it("transport none AVEC notre tunnel VPN actif = vérification, PAS offline, page conservée", () => {
+    for (const state of ALL_STATES) {
+      const r = browseGateDecision({
+        state,
+        bannerPresent: false,
+        transport: "none",
+        requireWifi: true,
+        vpnTunnelUp: true,
+      });
+      expect(r).toEqual({ allowed: false, reason: "verifying", preservePage: true });
     }
   });
 
@@ -39,7 +52,7 @@ describe("browseGateDecision", () => {
       transport: "cellular",
       requireWifi: true,
     });
-    expect(r).toEqual({ allowed: false, reason: "cellular" });
+    expect(r).toEqual({ allowed: false, reason: "cellular", preservePage: false });
   });
 
   it("ne suspend pas en cellular quand requireWifi est faux", () => {
@@ -69,10 +82,10 @@ describe("browseGateDecision", () => {
       transport: "wifi",
       requireWifi: true,
     });
-    expect(r).toEqual({ allowed: true, reason: null });
+    expect(r).toEqual({ allowed: true, reason: null, preservePage: true });
   });
 
-  it("exige la bannière pendant ad_active", () => {
+  it("exige la bannière pendant ad_active (suspension courte, page conservée)", () => {
     expect(
       browseGateDecision({
         state: "ad_active",
@@ -88,27 +101,27 @@ describe("browseGateDecision", () => {
         transport: "wifi",
         requireWifi: true,
       })
-    ).toEqual({ allowed: false, reason: "preparing_ad" });
+    ).toEqual({ allowed: false, reason: "preparing_ad", preservePage: true });
   });
 
-  it("donne un motif pour chaque état non navigable", () => {
-    const expected: Record<string, BrowseGateReason> = {
-      idle: "no_session",
-      ad_loading: "preparing_ad",
-      authorizing_wifi: "authorizing",
-      paused: "paused",
-      quota_exhausted: "quota_exhausted",
-      error: "error",
-      disconnecting: "disconnecting",
+  it("donne un motif pour chaque état non navigable, avec la bonne valeur de preservePage", () => {
+    const expected: Record<string, { reason: BrowseGateReason; preservePage: boolean }> = {
+      idle: { reason: "no_session", preservePage: false },
+      ad_loading: { reason: "preparing_ad", preservePage: true },
+      authorizing_wifi: { reason: "authorizing", preservePage: true },
+      paused: { reason: "paused", preservePage: true },
+      quota_exhausted: { reason: "quota_exhausted", preservePage: false },
+      error: { reason: "error", preservePage: false },
+      disconnecting: { reason: "disconnecting", preservePage: true },
     };
-    for (const [state, reason] of Object.entries(expected)) {
+    for (const [state, { reason, preservePage }] of Object.entries(expected)) {
       const r = browseGateDecision({
         state: state as ConnectionState,
         bannerPresent: true,
         transport: "wifi",
         requireWifi: true,
       });
-      expect(r).toEqual({ allowed: false, reason });
+      expect(r).toEqual({ allowed: false, reason, preservePage });
     }
   });
 
@@ -124,6 +137,7 @@ describe("browseSuspensionText", () => {
     const reasons: BrowseGateReason[] = [
       "preparing_ad",
       "authorizing",
+      "verifying",
       "paused",
       "quota_exhausted",
       "error",

@@ -69,6 +69,7 @@ export const BROWSING_STATES: ReadonlySet<ConnectionState> = new Set([
 export type BrowseGateReason =
   | "preparing_ad"
   | "authorizing"
+  | "verifying"
   | "paused"
   | "quota_exhausted"
   | "error"
@@ -77,15 +78,30 @@ export type BrowseGateReason =
   | "offline"
   | "cellular";
 
+/**
+ * Decision d'accès à la navigation.
+ *
+ * `preservePage` indique si la page DÉJÀ CHARGÉE peut rester montée (gelée,
+ * navigation bloquée, médias arrêtés) derrière un voile, en attendant une
+ * reprise courte (vérification, autorisation, pause). Quand c'est `false`,
+ * l'absence d'accès est réelle et durable (offline, session finie, quota) :
+ * la WebView est démontée.
+ */
 export interface BrowseGateDecision {
   allowed: boolean;
   reason: BrowseGateReason | null;
+  preservePage: boolean;
 }
 
 /**
- * Décision pure de navigation.
+ * Politique pure de navigation.
  *
- * - transport "none"  → suspendu (aucune connexion).
+ * - transport "none" AVEC notre tunnel VPN actif (`vpnTunnelUp` true) → ce
+ *   n'est PAS une perte de Wi-Fi : c'est NOTRE tunnel (autorisation native
+ *   échue/en cours de renouvellement) qui est devenu l'interface par défaut.
+ *   On n'affiche donc JAMAIS « Aucune connexion » (raison "verifying"), et on
+ *   préserve la page tant que la re-validation serveur peut reprendre.
+ * - transport "none" SANS tunnel VPN → réellement hors ligne → "offline".
  * - transport "cellular" + requireWifi → suspendu (passage sur données
  *   mobiles : Bôjô n'est plus sur le Wi-Fi du point d'accès).
  * - transport "unknown" → ne suspend pas (module absent ou source OS
@@ -97,14 +113,21 @@ export function browseGateDecision(opts: {
   bannerPresent: boolean;
   transport: NetworkTransport;
   requireWifi: boolean;
+  vpnTunnelUp?: boolean;
 }): BrowseGateDecision {
   const { state, bannerPresent, transport, requireWifi } = opts;
+  const vpnTunnelUp = opts.vpnTunnelUp ?? false;
 
+  if (transport === "none" && vpnTunnelUp) {
+    // Notre propre tunnel bloque : la session est en cours de re-validation,
+    // la page déjà chargée est conservée (gelée) plutôt que détruite.
+    return { allowed: false, reason: "verifying", preservePage: true };
+  }
   if (transport === "none") {
-    return { allowed: false, reason: "offline" };
+    return { allowed: false, reason: "offline", preservePage: false };
   }
   if (transport === "cellular" && requireWifi) {
-    return { allowed: false, reason: "cellular" };
+    return { allowed: false, reason: "cellular", preservePage: false };
   }
 
   if (BROWSING_STATES.has(state)) {
@@ -112,25 +135,28 @@ export function browseGateDecision(opts: {
     // la bannière persistante reste affichée. Pendant ad_active, la
     // publicité doit réellement être à l'écran (currentAd présent).
     const adSatisfied = state === "wifi_active" || bannerPresent;
-    return { allowed: adSatisfied, reason: adSatisfied ? null : "preparing_ad" };
+    if (!adSatisfied) {
+      return { allowed: false, reason: "preparing_ad", preservePage: true };
+    }
+    return { allowed: true, reason: null, preservePage: true };
   }
 
   switch (state) {
     case "ad_loading":
-      return { allowed: false, reason: "preparing_ad" };
+      return { allowed: false, reason: "preparing_ad", preservePage: true };
     case "authorizing_wifi":
-      return { allowed: false, reason: "authorizing" };
+      return { allowed: false, reason: "authorizing", preservePage: true };
     case "paused":
-      return { allowed: false, reason: "paused" };
+      return { allowed: false, reason: "paused", preservePage: true };
     case "quota_exhausted":
-      return { allowed: false, reason: "quota_exhausted" };
+      return { allowed: false, reason: "quota_exhausted", preservePage: false };
     case "error":
-      return { allowed: false, reason: "error" };
+      return { allowed: false, reason: "error", preservePage: false };
     case "disconnecting":
-      return { allowed: false, reason: "disconnecting" };
+      return { allowed: false, reason: "disconnecting", preservePage: true };
     case "idle":
     default:
-      return { allowed: false, reason: "no_session" };
+      return { allowed: false, reason: "no_session", preservePage: false };
   }
 }
 
@@ -148,6 +174,11 @@ export function browseSuspensionText(
       return {
         title: "Autorisation de l'accès…",
         message: "Le serveur confirme votre session. La navigation reprend toute seule.",
+      };
+    case "verifying":
+      return {
+        title: "Vérification de l'accès…",
+        message: "L'accès est en cours de contrôle. La navigation reprend dès confirmation.",
       };
     case "paused":
       return {

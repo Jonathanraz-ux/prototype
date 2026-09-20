@@ -20,6 +20,7 @@ import { COLORS, RADIUS } from "../../../../constants/theme";
 import AppHeader from "../../../../components/AppHeader";
 import BrowseAdBanner from "../../../../components/BrowseAdBanner";
 import BrowseSuspensionScreen from "../../../../components/BrowseSuspensionScreen";
+import BrowseSuspensionOverlay from "../../../../components/BrowseSuspensionOverlay";
 import { useConnection } from "../../../../contexts/ConnectionContext";
 import { useNetworkTransport } from "../../../../services/networkTransport";
 import { TAB_BAR_CLEARANCE, TAB_BAR_MARGIN } from "../../../../lib/tabBarMetrics";
@@ -104,7 +105,7 @@ export default function BrowseScreen() {
   const router = useRouter();
   const webRef = useRef<WebView>(null);
 
-  const { state, currentAd } = useConnection();
+  const { state, currentAd, vpnStatus, renewNow } = useConnection();
   const transport = useNetworkTransport(5000);
 
   const [input, setInput] = useState(GOOGLE_HOME_URL);
@@ -121,26 +122,51 @@ export default function BrowseScreen() {
   // n'est montée qu'à l'état autorisé ; toute autre condition suspend
   // réellement la navigation (démontage, arrêt chargements et médias).
   const bannerPresent = Boolean(currentAd);
+  // Notre tunnel VPN natif est-il l'interface par défaut ? Si oui, un
+  // transport « none » n'est pas une perte de Wi-Fi : c'est notre propre
+  // blocage (autorisation en cours de re-validation) → jamais « offline ».
+  const vpnTunnelUp = vpnStatus?.tunnelUp ?? false;
   const gate = browseGateDecision({
     state,
     bannerPresent,
     transport,
     requireWifi: true,
+    vpnTunnelUp,
   });
   const suspended = !gate.allowed;
   const suspendReason = gate.reason as BrowseGateReason | null;
+  // Page déjà chargée conservée (gelée) au lieu d'être détruite : les
+  // suspensions COURTES (vérification, autorisation, pause, préparation)
+  // ne démolissent plus l'URL/historique/contenu de la page en cours.
+  const preserve = Boolean(gate.preservePage);
   const suspendedRef = useRef(suspended);
   suspendedRef.current = suspended;
+  const preservedRef = useRef(false);
 
-  // Suspension effective : arrêt des chargements/médias, démontage de la
-  // WebView. À la reprise, remontée propre sur l'accueil Google (nouvelle
-  // instance, aucun contenu ni script résiduel).
+// Suspension effective : arrêt des chargements/médias de la page. Si la
+  // suspension est COURTE (verifying/authorizing/paused/preparing_ad), la page
+  // et son historique sont CONSERVÉS (gelés derrière le voile) ; sinon
+  // (offline, fin de session, quota, erreur), la WebView est démontée et la
+  // reprise repart proprement sur l'accueil Google (nouvelle instance).
   useEffect(() => {
     if (suspended) {
       webRef.current?.stopLoading();
       webRef.current?.injectJavaScript(STOP_MEDIA_JS);
+      if (preserve) {
+        preservedRef.current = true;
+        return;
+      }
+      preservedRef.current = false;
       setNavState(INITIAL_NAV);
       setLoadError(null);
+      return;
+    }
+    if (preservedRef.current) {
+      // Reprise après une suspension courte : pas de remontée, la page
+      // redevient simplement interactive (médias gérés par la bannière).
+      preservedRef.current = false;
+      setLoadError(null);
+      setNotice(null);
       return;
     }
     setSourceUrl(GOOGLE_HOME_URL);
@@ -148,7 +174,7 @@ export default function BrowseScreen() {
     setLoadError(null);
     setNotice(null);
     setResumeNonce((n) => n + 1);
-  }, [suspended]);
+  }, [suspended, preserve]);
 
   const navigate = useCallback((targetUrl: string) => {
     if (suspendedRef.current) return;
@@ -161,7 +187,11 @@ export default function BrowseScreen() {
     }
     setSourceUrl(targetUrl);
     setInput(targetUrl);
-  }, [sourceUrl, navState.loading]);
+    // Battement d'autorisation immédiat au démarrage d'une navigation
+    // (complémentaire du battement périodique — jamais un remplacement) :
+    // réduit les fenêtres sans renouvellement pendant l'usage du navigateur.
+    void renewNow();
+  }, [sourceUrl, navState.loading, renewNow]);
 
   // La recherche textuelle ouvre une recherche Google correctement encodée.
   const submit = useCallback(() => {
@@ -381,7 +411,7 @@ export default function BrowseScreen() {
       ) : null}
 
       <View style={styles.webArea}>
-        {suspended ? (
+        {suspended && !preserve ? (
           <BrowseSuspensionScreen
             reason={suspendReason ?? "no_session"}
             onGoHome={() => router.push("/(app)/(tabs)/dashboard")}
@@ -410,6 +440,16 @@ export default function BrowseScreen() {
               onError={handleWebError}
               onHttpError={handleHttpError}
             />
+            {suspended && preserve && (
+              <BrowseSuspensionOverlay
+                reason={suspendReason ?? "verifying"}
+                onRetry={() => {
+                  // Re-validation immédiate : la page reste gelée tant que
+                  // l'accès n'est pas re-confirmé (aucune navigation possible).
+                  void renewNow();
+                }}
+              />
+            )}
           </View>
         )}
 
