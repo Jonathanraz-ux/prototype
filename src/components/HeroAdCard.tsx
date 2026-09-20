@@ -46,6 +46,7 @@ export default function HeroAdCard() {
     vpnStatus,
     handlePlaybackStatusUpdate,
     handleAdMediaError,
+    adViewNonce,
   } = useConnection();
 
   const [mediaFailed, setMediaFailed] = useState(false);
@@ -185,9 +186,12 @@ export default function HeroAdCard() {
             <BrandIcon color="#FFFFFF" size={44} />
           </View>
         ) : (
-          <AdMedia
-            key={currentAd.id}
-            ad={currentAd}
+<AdMedia
+          // Clé campagne:visionnage : un nouveau visionnage de la MÊME campagne
+          // remonte le lecteur depuis le début (sinon le lecteur expo-av,
+          // recyclé par la clé constante, restait figé en fin de vidéo).
+          key={`${currentAd.id}:${adViewNonce}`}
+          ad={currentAd}
             shouldPlay={adOnScreen && isPlayingRequested && isFocused}
             isLooping={loopMode}
             onError={() => {

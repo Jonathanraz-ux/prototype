@@ -50,6 +50,7 @@ export default function BrowseAdBanner({ variant = "top" }: BrowseAdBannerProps)
     pauseSession,
     handlePlaybackStatusUpdate,
     handleAdMediaError,
+    adViewNonce,
   } = useConnection();
 
   const isFocused = useIsFocusedScreen();
@@ -188,6 +189,10 @@ export default function BrowseAdBanner({ variant = "top" }: BrowseAdBannerProps)
 
       {!mediaFailed ? (
         <AdMedia
+          // Clé campagne:visionnage : un nouveau visionnage de la MÊME campagne
+          // remonte le lecteur depuis le début (sinon le lecteur expo-av,
+          // recyclé par la clé constante, restait figé en fin de vidéo).
+          key={`${currentAd.id}:${adViewNonce}`}
           ad={currentAd}
           shouldPlay={adOnScreen && isPlayingRequested && isFocused}
           isLooping={loopMode}
