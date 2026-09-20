@@ -292,7 +292,9 @@ export async function requestDemoWifiSession(input: {
   });
 
   if (!res.ok || res.data === null) {
-    return { ok: false, reason: "session_failed" };
+    // Motif PRÉCIS propagé (timeout / network_error / code PostgREST) pour que
+    // resumeFromPaused distingue une panne transitoire d'une fin de session.
+    return { ok: false, reason: !res.ok ? res.error.code : "session_failed" };
   }
 
   const d = res.data;
@@ -334,12 +336,17 @@ async function fetchProfileOrg(
   try {
     const config = getConfig();
     const url = `${config.EXPO_PUBLIC_SUPABASE_URL.replace(/\/$/, "")}/rest/v1/profiles?id=eq.${userId}&select=organization_id`;
-    const response = await fetch(url, {
-      headers: {
-        apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    // Délai BORNÉ : sans timeout, une requête suspendue gelait indéfiniment
+    // la reprise de session (« Autorisation en cours » sans fin, BUG 1 v5).
+    const response = await Promise.race([
+      fetch(url, {
+        headers: {
+          apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
+        },
+      }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000)),
+    ]);
     if (!response.ok) return null;
     const rows = (await response.json()) as { organization_id: string | null }[];
     return rows?.[0] ?? null;

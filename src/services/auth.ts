@@ -6,8 +6,6 @@ import type { User, RegisterData } from "../types";
 const TAG = "auth";
 const DEMO_STORAGE_KEY = "@wifizone/demo_user_session";
 const DEMO_EMAIL = "demo@wifizone.app";
-const DEMO_USER_ID = "d9fe1d87-b4a8-4b92-8ebc-d213b2929e8d";
-const DEMO_ORG_ID = "d9fe1d87-b4a8-4b92-8ebc-d213b2929e8d";
 const isDemoNetworkMode = () =>
   (process.env.EXPO_PUBLIC_NETWORK_MODE ?? "") === "android_vpn_demo";
 
@@ -42,18 +40,20 @@ export function getAccessToken(): string | null {
   return _cachedAccessToken;
 }
 
-export const DEMO_TEST_USER: User = {
-  id: DEMO_USER_ID,
-  organizationId: DEMO_ORG_ID,
-  firstName: "Démo",
-  lastName: "Utilisateur",
-  fullName: "Démo Bôjô",
-  email: "demo@wifizone.app",
-  phone: "+33600000000",
-  role: "organization_admin",
-  status: "active",
-  createdAt: new Date().toISOString(),
-};
+function profileFallback(data: { id: string; email?: string }): User {
+  return {
+    id: data.id,
+    organizationId: "",
+    firstName: data.email?.split("@")[0] ?? "Utilisateur",
+    lastName: "",
+    fullName: data.email ?? "",
+    email: data.email ?? "",
+    phone: "",
+    role: "user",
+    status: "active",
+    createdAt: new Date().toISOString(),
+  };
+}
 
 function mapProfileToUser(row: {
   id: string;
@@ -149,18 +149,16 @@ export const AuthService = {
       if (user) {
         const profile = await fetchProfile(user.id);
         if (profile) return profile;
+        // Utilisateur RÉELLEMENT authentifié sans profil : profil minimal
+        // réel (jamais d'identité démo fabriquée, AUCUN fichier stocké).
+        return profileFallback(user);
       }
     } catch {
       // Ignorer erreur réseau en mode démo
     }
-    const demoRaw = await AsyncStorage.getItem(DEMO_STORAGE_KEY);
-    if (demoRaw) {
-      try {
-        return JSON.parse(demoRaw) as User;
-      } catch {
-        return null;
-      }
-    }
+    // Aucune session RÉELLE → aucun utilisateur. La version v5 renvoyait ici
+    // une session « démo » stockée localement (sans JWT) : ce contournement
+    // est supprimé. L'authentification passe exclusivement par le back-end.
     return null;
   },
 
@@ -230,126 +228,39 @@ export const AuthService = {
   },
 
   /**
-   * Connexion réelle via Supabase Auth avec fallback démo transparent.
+   * Connexion via Supabase Auth UNIQUEMENT. Aucune session locale
+   * artificielle : un mot de passe invalide (même pour les emails
+   * demo@/test@) est REFUSÉ avec une erreur traduite. Les comptes démo
+   * sont de vrais comptes (authentifiés par le back-end), jamais créés
+   * silencieusement côté client.
    */
   async signIn(email: string, password: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
-    const isDemoEmail =
-      cleanEmail === "demo@wifizone.app" ||
-      cleanEmail === "test@wifizone.app" ||
-      cleanEmail === "demo" ||
-      cleanEmail === "test";
-
     const normalizedEmail = cleanEmail.includes("@")
       ? cleanEmail
       : `${cleanEmail}@wifizone.app`;
 
-    try {
-      const supabase = getSupabase();
+    const { data, error } = await getSupabase().auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
 
-      // Tentative de connexion réelle
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-
-      if (!error && data.user) {
-        _cachedAccessToken = data.session?.access_token ?? null;
-        await AsyncStorage.removeItem(DEMO_STORAGE_KEY);
-        const profile = await fetchProfile(data.user.id);
-        if (profile) return profile;
-        // Compte existe dans Auth mais pas de profil → créer le profil
-        const fallbackUser: User = {
-          ...DEMO_TEST_USER,
-          id: data.user.id,
-          email: normalizedEmail,
-        };
-        return fallbackUser;
-      }
-
-      // Si ce n'est pas un email démo, on propage l'erreur
-      if (error && !isDemoEmail) {
-        logger.warn(TAG, "Échec connexion", error.message);
-        throw new Error(translateAuthError(error.message));
-      }
-
-      // Pour les emails démo : tentative de création du compte si inexistant
-      if (error && isDemoEmail) {
-        const errorLower = (error.message ?? "").toLowerCase();
-        const isMissing =
-          errorLower.includes("invalid login") ||
-          errorLower.includes("user not found") ||
-          errorLower.includes("email not found");
-
-        if (isMissing) {
-          logger.info(TAG, "Compte démo absent, tentative de création", normalizedEmail);
-          try {
-            const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-              email: normalizedEmail,
-              password,
-              options: {
-                data: {
-                  first_name: "Démo",
-                  last_name: "Utilisateur",
-                  full_name: "Démo Bôjô",
-                },
-                emailRedirectTo: undefined,
-              },
-            });
-
-            if (!signUpErr && signUpData?.user) {
-              // Auto-confirmer le compte via l'API admin n'est pas possible côté client.
-              // Si l'email confirmation est activée, on tente quand même la connexion
-              // (Supabase retourne une erreur "Email not confirmed").
-              // Dans ce cas, le fallback local est la seule option.
-              await AsyncStorage.removeItem(DEMO_STORAGE_KEY);
-              const profile = await fetchProfile(signUpData.user.id);
-              if (profile) return profile;
-
-              // Créer le profil si nécessaire
-              const { error: profileErr } = await supabase.from("profiles").upsert(
-                {
-                  id: signUpData.user.id,
-                  first_name: "Démo",
-                  last_name: "Utilisateur",
-                  full_name: "Démo Bôjô",
-                  email: normalizedEmail,
-                  role: "organization_admin",
-                  status: "active",
-                },
-                { onConflict: "id" }
-              );
-
-              if (profileErr) {
-                logger.warn(TAG, "Échec création profil démo", profileErr.message);
-              }
-
-              return {
-                ...DEMO_TEST_USER,
-                id: signUpData.user.id,
-                email: normalizedEmail,
-              };
-            }
-          } catch (signUpEx) {
-            logger.warn(TAG, "Création compte démo impossible", signUpEx);
-          }
-        }
-      }
-    } catch (e: any) {
-      if (!isDemoEmail) throw e;
+    if (error) {
+      logger.warn(TAG, "Échec connexion", error.message);
+      throw new Error(translateAuthError(error.message));
     }
 
-    // Fallback démo : session artificielle (le serveur ne sera pas joignable)
-    if (isDemoEmail) {
-      const demoUser: User = {
-        ...DEMO_TEST_USER,
-        email: normalizedEmail,
-      };
-      await AsyncStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(demoUser));
-      return demoUser;
+    if (!data.user) {
+      throw new Error("Impossible de se connecter.");
     }
 
-    throw new Error("Impossible de se connecter.");
+    _cachedAccessToken = data.session?.access_token ?? null;
+    await AsyncStorage.removeItem(DEMO_STORAGE_KEY);
+    const profile = await fetchProfile(data.user.id);
+    if (profile) return profile;
+    // Compte authentifié sans profil : profil minimal RÉEL (aucune identité
+    // démo fabriquée, aucun rôle privilégié inventé).
+    return profileFallback(data.user);
   },
 
   /**

@@ -42,27 +42,63 @@ export async function startAdView(req: Request): Promise<Response> {
     return fail("campaign_id requis", 400, "missing_campaign");
   }
 
-  // Vérifie que la campagne est active, dans sa fenêtre de diffusion,
-  // et rattachée à l'organisation de l'utilisateur.
-  const { data: profile } = await supabase
+  // Organisation de l'utilisateur. Un compte auto-inscrit (aucun
+  // organization_id) est rattaché automatiquement à l'organisation de
+  // démonstration : sans rattachement, le flux publicitaire → session
+  // était coupé à la racine (no_organization).
+  let profile = await supabase
     .from("profiles")
     .select("organization_id")
     .eq("id", user.id)
     .maybeSingle();
-  if (!profile?.organization_id) {
+
+  let orgId = profile?.organization_id ?? null;
+  if (!orgId) {
+    const { data: onboard } = await supabase.rpc("bujo_onboard_org", {
+      p_user_id: user.id,
+    });
+    orgId = (onboard as { organization_id?: string } | null)?.organization_id ?? null;
+    if (orgId) profile = { organization_id: orgId };
+  }
+  if (!orgId) {
     return fail("Profil incomplet", 400, "no_organization");
   }
 
-  const { data: campaign, error: campErr } = await supabase
-    .from("ad_campaigns")
-    .select("id, organization_id, title, advertiser_name, media_url, thumbnail_url, duration_seconds, reward_type, reward_value, starts_at, ends_at")
-    .eq("id", body.campaign_id)
-    .eq("status", "active")
-    .eq("organization_id", profile.organization_id)
-    .maybeSingle();
+  const nowIso = new Date().toISOString();
 
-  if (campErr || !campaign) {
-    return fail("Campagne indisponible", 404, "campaign_unavailable");
+  // Résolution de la campagne : si l'identifiant demandé existe pour
+  // l'organisation, il est utilisé. Sinon (identifiant de repli inconnu,
+  // ex. « demo-campaign-video » du mode démo, ou campagne d'une autre
+  // organisation), on retombe sur une campagne active de l'organisation
+  // — de préférence la campagne de repli dédiée (is_fallback). Le flux ne
+  // doit jamais se bloquer sur un identifiant publicitaire inconnu.
+  let campaign: Record<string, unknown> | null = null;
+  if (body.campaign_id) {
+    const { data: found, error: foundErr } = await supabase
+      .from("ad_campaigns")
+      .select("id, organization_id, site_id, title, advertiser_name, media_url, thumbnail_url, duration_seconds, reward_type, reward_value, starts_at, ends_at, is_fallback")
+      .eq("id", body.campaign_id)
+      .eq("organization_id", orgId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (!foundErr && found) campaign = found;
+  }
+
+  if (!campaign) {
+    const { data: fallback, error: fbErr } = await supabase
+      .from("ad_campaigns")
+      .select("id, organization_id, site_id, title, advertiser_name, media_url, thumbnail_url, duration_seconds, reward_type, reward_value, starts_at, ends_at, is_fallback")
+      .eq("organization_id", orgId)
+      .eq("status", "active")
+      .or(`starts_at.is.null,starts_at.lte.${nowIso}`)
+      .order("is_fallback", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (fbErr || !fallback) {
+      return fail("Aucune campagne publicitaire active", 404, "campaign_unavailable");
+    }
+    campaign = fallback;
   }
 
   const now = Date.now();
@@ -80,8 +116,9 @@ export async function startAdView(req: Request): Promise<Response> {
   const { data: view, error: viewErr } = await supabase
     .from("ad_views")
     .insert({
-      organization_id: profile.organization_id,
-      campaign_id: body.campaign_id,
+      organization_id: orgId,
+      campaign_id: campaign.id,
+      site_id: (campaign.site_id as string | null) ?? null,
       user_id: user.id,
       proof_nonce: proofToken,
       completion_status: "abandoned",
@@ -123,7 +160,10 @@ async function signProof(payload: string): Promise<string> {
 function mapCampaign(row: Record<string, unknown>) {
   const media = (row.media_url as string) ?? "";
   return {
-    id: row.id,
+    // Campagne de repli : identifiant symbolique du mode démo → le client
+    // lit la vidéo LOCALE embarquée (chargement instantané, sans réseau),
+    // au lieu de streamer media_url (lent sur liaison mobile faible).
+    id: row.is_fallback ? "demo-campaign-video" : row.id,
     title: row.title ?? "",
     advertiserName: row.advertiser_name ?? "",
     mediaUrl: media,

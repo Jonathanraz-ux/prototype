@@ -10,6 +10,12 @@ export interface AdMediaProps {
   isLooping?: boolean;
   onError: () => void;
   onPlaybackStatusUpdate: (status: AVPlaybackStatus) => void;
+  /**
+   * Typage du média dans son conteneur. "cover" (défaut, hérité) remplit et
+   * recadre ; "contain" (bande persistante du navigateur) conserve les
+   * proportions réelles de la création sans la déformer ni la couper.
+   */
+  mediaResizeMode?: "cover" | "contain";
 }
 
 /**
@@ -25,7 +31,8 @@ export default function AdMedia({
   shouldPlay,
   isLooping = false,
   onError,
-  onPlaybackStatusUpdate
+  onPlaybackStatusUpdate,
+  mediaResizeMode = "cover"
 }: AdMediaProps) {
   const videoRef = useRef<Video>(null);
 
@@ -60,7 +67,7 @@ export default function AdMedia({
         ref={videoRef}
         source={source}
         style={StyleSheet.absoluteFill}
-        resizeMode={ResizeMode.COVER}
+        resizeMode={mediaResizeMode === "contain" ? ResizeMode.CONTAIN : ResizeMode.COVER}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
         isMuted={true}
@@ -80,7 +87,7 @@ export default function AdMedia({
     <Image
       source={{ uri: ad.mediaUrl }}
       style={StyleSheet.absoluteFill}
-      resizeMode="cover"
+      resizeMode={mediaResizeMode === "contain" ? "contain" : "cover"}
       onError={onError}
     />
   );

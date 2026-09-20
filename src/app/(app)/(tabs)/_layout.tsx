@@ -11,6 +11,7 @@ import {
   type LucideIcon
 } from "lucide-react-native";
 import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
+import { TAB_BAR_HEIGHT, TAB_BAR_BOTTOM_OFFSET } from "../../../lib/tabBarMetrics";
 
 const SPRING = { damping: 16, stiffness: 180, mass: 0.6 };
 
@@ -105,8 +106,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 18,
     right: 18,
-    bottom: Platform.OS === "ios" ? 22 : 16,
-    height: Platform.OS === "ios" ? 76 : 70,
+    bottom: TAB_BAR_BOTTOM_OFFSET,
+    height: TAB_BAR_HEIGHT,
     backgroundColor: "rgba(58, 9, 150, 0.96)",
     borderTopWidth: 0,
     borderWidth: 1,

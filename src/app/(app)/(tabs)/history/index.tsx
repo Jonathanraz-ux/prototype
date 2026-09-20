@@ -9,6 +9,7 @@ import { REASON_LABELS } from "../../../../services/connectionMachine";
 import { formatDate, formatDuration, formatBytes } from "../../../../hooks";
 import GlassCard from "../../../../components/GlassCard";
 import AppHeader from "../../../../components/AppHeader";
+import { TAB_BAR_CLEARANCE, TAB_BAR_MARGIN } from "../../../../lib/tabBarMetrics";
 import type { ConnectionHistoryItem, DisconnectReason } from "../../../../types";
 
 const REASON_ICONS: Record<DisconnectReason, LucideIcon> = {
@@ -88,7 +89,7 @@ export default function HistoryScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 110 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + TAB_BAR_MARGIN }}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
       >

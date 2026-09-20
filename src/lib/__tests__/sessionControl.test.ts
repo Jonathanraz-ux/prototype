@@ -13,8 +13,10 @@ import {
   SERVER_QUOTA_UNIT,
   buildReconciliationReport,
   CONTROL_FAILURE_THRESHOLD,
+  resumeFailureAction,
   type ServerSessionView,
 } from "../sessionControl";
+import { TAB_BAR_CLEARANCE, TAB_BAR_HEIGHT, TAB_BAR_BOTTOM_OFFSET } from "../tabBarMetrics";
 
 // ————————————————————————————————————————————————————————————
 // Portée de ces tests : logique SIMULÉE (aucune Edge Function, aucun
@@ -146,6 +148,27 @@ describe("signalFromServer / applyServerSignal — les écrans reflètent l'éta
     expect(signalFromServer(sess({ status: "expired", disconnect_reason: "HEARTBEAT_TIMEOUT" }))).toEqual({
       mode: "closed",
       reason: "HEARTBEAT_TIMEOUT",
+    });
+  });
+
+  it("sans enforceExpiry : une session active même échue reste active (comportement hérité)", () => {
+    const stale = sess({ status: "active", router_session_reference: "vpn-demo-local", heartbeat_expires_at: t0 });
+    expect(signalFromServer(stale, { now: Date.parse("2026-09-14T10:00:00.000Z") }).mode).toBe("active");
+  });
+
+  it("démo + grâce serveur échue → closed/HEARTBEAT_TIMEOUT (jamais un accès obsolète)", () => {
+    const stale = sess({ status: "active", router_session_reference: "vpn-demo-local", heartbeat_expires_at: t0 });
+    const sig = signalFromServer(stale, {
+      enforceExpiry: true,
+      now: Date.parse("2026-09-14T10:00:00.000Z"),
+    });
+    expect(sig).toEqual({ mode: "closed", reason: "HEARTBEAT_TIMEOUT" });
+  });
+
+  it("démo + grâce non échue → active", () => {
+    const live = sess({ status: "active", router_session_reference: "vpn-demo-local", heartbeat_expires_at: "2026-09-14T12:00:00.000Z" });
+    expect(signalFromServer(live, { enforceExpiry: true, now: Date.parse("2026-09-14T10:00:00.000Z") })).toEqual({
+      mode: "active",
     });
   });
 
@@ -282,5 +305,48 @@ describe("scénario : expiration → nouvelle autorisation VÉRIFIÉE uniquement
 describe("panne de contrôle — seuil de défaillances consécutives", () => {
   it("seuil exposé et borné (>= 1) : le client ne maintient jamais un accès aveugle", () => {
     expect(CONTROL_FAILURE_THRESHOLD).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ————————————————————————————————————————————————————————————
+// REPRISE — décision d'échec de resumeFromPaused.
+// Régression BUG 1 : une panne TRANSITOIRE doit CONSERVER l'état « en
+// pause » (réessai possible) ; seule une fin de session CONFIRMÉE sort
+// de la pause. Aucun échec muet (le v5 restait bloqué sans trace).
+// ————————————————————————————————————————————————————————————
+describe("resumeFailureAction — une panne transitoire ne volatilise pas la pause", () => {
+  it("quota épuisé → quota_exhausted (état dédié, jamais un simple réessai)", () => {
+    expect(resumeFailureAction("quota_exhausted")).toBe("quota_exhausted");
+  });
+
+  it("délai dépassé / réseau indisponible → stay_paused (réessai possible)", () => {
+    expect(resumeFailureAction("timeout")).toBe("stay_paused");
+    expect(resumeFailureAction("network_error")).toBe("stay_paused");
+    expect(resumeFailureAction("session_failed")).toBe("stay_paused");
+    expect(resumeFailureAction(undefined)).toBe("stay_paused");
+    expect(resumeFailureAction("unknown")).toBe("stay_paused");
+  });
+
+  it("fin de session confirmée (session fermée, organisation absente) → to_idle", () => {
+    expect(resumeFailureAction("no_organization")).toBe("to_idle");
+    expect(resumeFailureAction("PGRST116")).toBe("to_idle");
+  });
+
+  it("les motifs transitoires sont extensibles par l'appelant sans changer le défaut", () => {
+    expect(resumeFailureAction("foo", { transientReasons: new Set(["foo"]) })).toBe("stay_paused");
+    expect(resumeFailureAction("foo")).toBe("to_idle");
+  });
+});
+
+// ————————————————————————————————————————————————————————————
+// RÉGRESSION LAYOUT (BUG 1) — la géométrie de la barre d'onglets
+// est une source unique : tout écran d'onglet réserve une marge ≥
+// la hauteur réelle occupée par la barre (le bouton « Reprendre la
+// session » ne peut plus être recouvert).
+// ————————————————————————————————————————————————————————————
+describe("barre d'onglets — constante partagée (layout)", () => {
+  it("la marge de dégagement dépasse la zone occultée (barre + décalage)", () => {
+    expect(TAB_BAR_CLEARANCE).toBeGreaterThan(0);
+    expect(TAB_BAR_CLEARANCE).toBe(TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_OFFSET);
   });
 });

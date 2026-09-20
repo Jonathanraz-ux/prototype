@@ -118,12 +118,13 @@ export default function LoginScreen() {
               <Pressable
                 onPress={() => {
                   setEmail("demo@wifizone.app");
-                  setPassword("Password123!");
+                  setPassword("");
+                  setError("");
                 }}
                 style={({ pressed }) => [styles.demoButton, { opacity: pressed ? 0.7 : 1 }]}
               >
                 <Text style={styles.demoTitle}>Remplir avec le compte de test démo</Text>
-                <Text style={styles.demoSub}>demo@wifizone.app • Password123!</Text>
+                <Text style={styles.demoSub}>demo@wifizone.app — mot de passe communiqué séparément</Text>
               </Pressable>
             )}
           </View>

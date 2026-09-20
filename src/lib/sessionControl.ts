@@ -186,6 +186,7 @@ export interface ServerSessionView {
   status?: string;
   disconnect_reason?: string | null;
   router_session_reference?: string | null;
+  heartbeat_expires_at?: string | null;
   bytes_in?: number;
   bytes_out?: number;
   bytes_total?: number;
@@ -200,7 +201,10 @@ export type ServerSignal =
   | { mode: "quota_exhausted" }
   | { mode: "closed"; reason: DisconnectReason | undefined };
 
-export function signalFromServer(s?: ServerSessionView | null): ServerSignal {
+export function signalFromServer(
+  s?: ServerSessionView | null,
+  opts?: { enforceExpiry?: boolean; now?: number }
+): ServerSignal {
   const status = s?.status ?? "";
   if (!status) return { mode: "none" };
 
@@ -209,6 +213,17 @@ export function signalFromServer(s?: ServerSessionView | null): ServerSignal {
 
   const reason = (s?.disconnect_reason as DisconnectReason | null | undefined) ?? undefined;
   if (status === "authorized" || status === "active") {
+    // En démo, une session « active » SANS battement de présence frais est
+    // une session échue : la grâce serveur (heartbeat_expires_at) est dépassée,
+    // elle n'est PLUS un accès valide (obsolète il peut en rester une après
+    // un ancien octroi — elle ne doit ni imposer authorizing_wifi ni
+    // interférer avec un nouveau flux de connexion).
+    if (opts?.enforceExpiry && opts.now !== undefined && s?.heartbeat_expires_at) {
+      const exp = Date.parse(s.heartbeat_expires_at);
+      if (!Number.isNaN(exp) && exp <= opts.now) {
+        return { mode: "closed", reason: "HEARTBEAT_TIMEOUT" };
+      }
+    }
     return Boolean(s?.router_session_reference) ? { mode: "active" } : { mode: "unconfirmed" };
   }
   if (reason === "QUOTA_EXHAUSTED") return { mode: "quota_exhausted" };
@@ -353,3 +368,30 @@ export function buildReconciliationReport(
  * ne doit JAMAIS se traduire par un maintien silencieux de l'accès.
  */
 export const CONTROL_FAILURE_THRESHOLD = 3;
+
+// ————————————————————————————————————————————————————————————
+// Décision d'échec de REPRISE (resumeFromPaused).
+// Une panne TRANSITOIRE (réseau, serveur indisponible, délai dépassé) ne doit
+// JAMAIS volatiliser l'état « en pause » : on reste suspendu, on affiche une
+// erreur compréhensible et l'utilisateur peut réessayer. Seule une fin de
+// session CONFIRMÉE (quota, échéance inutilisable, session fermée) sort
+// définitivement de la pause (→ idle, nouvelle autorisation exigée).
+// ————————————————————————————————————————————————————————————
+export type ResumeFailure = "stay_paused" | "quota_exhausted" | "to_idle";
+
+const DEFAULT_TRANSIENT_REASONS: ReadonlySet<string> = new Set([
+  "timeout",
+  "network_error",
+  "session_failed",
+  "unknown",
+]);
+
+export function resumeFailureAction(
+  reason: string | undefined,
+  opts?: { transientReasons?: ReadonlySet<string> }
+): ResumeFailure {
+  if (reason === "quota_exhausted") return "quota_exhausted";
+  const transients = opts?.transientReasons ?? DEFAULT_TRANSIENT_REASONS;
+  if (!reason || transients.has(reason)) return "stay_paused";
+  return "to_idle";
+}

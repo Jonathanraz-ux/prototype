@@ -3,10 +3,10 @@ import { useAuth } from "../contexts/AuthContext";
 import { useLicense } from "../contexts/LicenseContext";
 
 export default function Index() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isRestoring } = useAuth();
   const { gate } = useLicense();
 
-  if (isLoading) return null;
+  if (isRestoring) return null;
 
   if (isAuthenticated) {
     // La licence contrôle l'accès : si elle n'est pas OK, afficher l'écran

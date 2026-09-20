@@ -14,6 +14,7 @@ import {
 } from "lucide-react-native";
 import { COLORS } from "../constants/theme";
 import { useConnection } from "../contexts/ConnectionContext";
+import { useIsFocusedScreen } from "../hooks/useIsFocusedScreen";
 import AdMedia from "./AdMedia";
 
 const AD_ICONS: Record<string, LucideIcon> = {
@@ -50,6 +51,11 @@ export default function HeroAdCard() {
   const [mediaFailed, setMediaFailed] = useState(false);
   const [isPlayingRequested, setIsPlayingRequested] = useState(true);
 
+  // Les onglets restent montés : un SEUL lecteur actif à la fois (l'onglet
+  // masqué met sa vidéo en pause et cesse d'émettre ses événements), pour
+  // éviter deux audios/vidéos et deux comptages simultanés.
+  const isFocused = useIsFocusedScreen();
+
   const isWatching = state === "ad_active" || state === "ad_loading";
   const completed = state === "wifi_active" || state === "authorizing_wifi";
   const isConnected = state === "wifi_active";
@@ -69,6 +75,16 @@ export default function HeroAdCard() {
       setIsPlayingRequested(true);
     }
   }, [currentAd?.id, state]);
+
+  // Transfert de focus (Naviguer → Accueil) pendant une session autorisée ou
+  // un visionnage : la publicité reprend d'elle-même, elle n'est jamais
+  // laissée figée après une reprise centrale. La pause volontaire sur
+  // l'onglet courant (state "paused") n'est pas concernée.
+  useEffect(() => {
+    if (isFocused && (state === "wifi_active" || state === "ad_active")) {
+      setIsPlayingRequested(true);
+    }
+  }, [isFocused, state]);
 
   // Si aucune pub disponible et aucune lecture en cours :
   if (!currentAd && !isWatching && !completed) {
@@ -172,14 +188,18 @@ export default function HeroAdCard() {
           <AdMedia
             key={currentAd.id}
             ad={currentAd}
-            shouldPlay={adOnScreen && isPlayingRequested}
+            shouldPlay={adOnScreen && isPlayingRequested && isFocused}
             isLooping={loopMode}
             onError={() => {
               setMediaFailed(true);
-              void handleAdMediaError("Échec de lecture du média publicitaire");
+              if (isFocused) {
+                void handleAdMediaError("Échec de lecture du média publicitaire");
+              }
             }}
             onPlaybackStatusUpdate={(status) => {
-              void handlePlaybackStatusUpdate(status);
+              if (isFocused) {
+                void handlePlaybackStatusUpdate(status);
+              }
             }}
           />
         )}

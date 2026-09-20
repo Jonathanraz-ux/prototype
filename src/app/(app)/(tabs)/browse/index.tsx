@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, Keyboard } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import {
   WebView,
   type WebViewNavigation,
@@ -18,6 +19,14 @@ import {
 import { COLORS, RADIUS } from "../../../../constants/theme";
 import AppHeader from "../../../../components/AppHeader";
 import BrowseAdBanner from "../../../../components/BrowseAdBanner";
+import BrowseSuspensionScreen from "../../../../components/BrowseSuspensionScreen";
+import { useConnection } from "../../../../contexts/ConnectionContext";
+import { useNetworkTransport } from "../../../../services/networkTransport";
+import { TAB_BAR_CLEARANCE, TAB_BAR_MARGIN } from "../../../../lib/tabBarMetrics";
+import {
+  browseGateDecision,
+  type BrowseGateReason,
+} from "../../../../lib/browsePolicy";
 import { normalizeBrowserInput, googleSearchUrl, GOOGLE_HOME_URL } from "../../../../lib/browser";
 
 // Compatibilité "nouvelle fenêtre" : les liens target="_blank" et window.open
@@ -42,6 +51,18 @@ const NEW_WINDOW_HANDLER_JS = `
         window.location.href = el.href;
       }
     }, true);
+  } catch (err) {}
+})();
+true;
+`;
+
+// Arrêt des médias (audio/vidéo) de la page chargée avant démontage de la
+// WebView en suspension. Aucune injection publicitaire, aucun autre accès.
+const STOP_MEDIA_JS = `
+(function () {
+  try {
+    var m = document.querySelectorAll("video,audio");
+    for (var i = 0; i < m.length; i++) { m[i].pause(); }
   } catch (err) {}
 })();
 true;
@@ -80,7 +101,11 @@ const INITIAL_NAV: NavState = { canGoBack: false, canGoForward: false, loading: 
 
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const webRef = useRef<WebView>(null);
+
+  const { state, currentAd } = useConnection();
+  const transport = useNetworkTransport(5000);
 
   const [input, setInput] = useState(GOOGLE_HOME_URL);
   const [sourceUrl, setSourceUrl] = useState(GOOGLE_HOME_URL);
@@ -88,10 +113,45 @@ export default function BrowseScreen() {
   const [editing, setEditing] = useState(false);
   const [loadError, setLoadError] = useState<BrowseError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [resumeNonce, setResumeNonce] = useState(0);
 
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Décision pure de navigation (session + publicité + réseau). La WebView
+  // n'est montée qu'à l'état autorisé ; toute autre condition suspend
+  // réellement la navigation (démontage, arrêt chargements et médias).
+  const bannerPresent = Boolean(currentAd);
+  const gate = browseGateDecision({
+    state,
+    bannerPresent,
+    transport,
+    requireWifi: true,
+  });
+  const suspended = !gate.allowed;
+  const suspendReason = gate.reason as BrowseGateReason | null;
+  const suspendedRef = useRef(suspended);
+  suspendedRef.current = suspended;
+
+  // Suspension effective : arrêt des chargements/médias, démontage de la
+  // WebView. À la reprise, remontée propre sur l'accueil Google (nouvelle
+  // instance, aucun contenu ni script résiduel).
+  useEffect(() => {
+    if (suspended) {
+      webRef.current?.stopLoading();
+      webRef.current?.injectJavaScript(STOP_MEDIA_JS);
+      setNavState(INITIAL_NAV);
+      setLoadError(null);
+      return;
+    }
+    setSourceUrl(GOOGLE_HOME_URL);
+    setInput(GOOGLE_HOME_URL);
+    setLoadError(null);
+    setNotice(null);
+    setResumeNonce((n) => n + 1);
+  }, [suspended]);
+
   const navigate = useCallback((targetUrl: string) => {
+    if (suspendedRef.current) return;
     Keyboard.dismiss();
     setEditing(false);
     setNotice(null);
@@ -105,6 +165,7 @@ export default function BrowseScreen() {
 
   // La recherche textuelle ouvre une recherche Google correctement encodée.
   const submit = useCallback(() => {
+    if (suspendedRef.current) return;
     const target = normalizeBrowserInput(input);
     if (target.kind === "invalid") {
       setNotice(target.reason);
@@ -161,9 +222,12 @@ export default function BrowseScreen() {
   }, []);
 
   const shouldStartLoad = useCallback((request: LoadRequest): boolean => {
-    // Seul http/https est autorisé dans la WebView : les autres schémas
-    // (mailto:, tel:, intent:, geo:, etc.) ne déclenchent AUCUNE application
-    // externe. Les protections TLS ne sont jamais désactivées.
+    // Pendant une suspension, AUCUNE nouvelle navigation n'est autorisée
+    // (garde-fou en plus du démontage). Hors suspension : seul http/https
+    // est autorisé dans la WebView — les autres schémas (mailto:, tel:,
+    // intent:, geo:, etc.) ne déclenchent AUCUNE application externe. Les
+    // protections TLS ne sont jamais désactivées.
+    if (suspendedRef.current) return false;
     const scheme = request.url.split(":")[0].toLowerCase();
     return scheme === "http" || scheme === "https";
   }, []);
@@ -199,20 +263,31 @@ export default function BrowseScreen() {
   );
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
+    <View
+      style={[
+        styles.screen,
+        {
+          paddingTop: insets.top + 10,
+          // Réserve l'espace réellement occupé par la barre d'onglets flottante
+          // et les barres système : la bande publicitaire reste visible
+          // AU-DESSUS des onglets, jamais recouverte par eux.
+          paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + TAB_BAR_MARGIN,
+        },
+      ]}
+    >
       <View style={{ paddingHorizontal: 20 }}>
         <AppHeader title="Naviguer" subtitle="Internet Bôjô pour tous" />
       </View>
 
-      <View style={{ marginTop: 14, marginBottom: 12 }}>
-        <BrowseAdBanner />
-      </View>
-
       <View style={styles.addressRow}>
         <Pressable
+          disabled={suspended}
           onPress={() => navigate(GOOGLE_HOME_URL)}
           accessibilityLabel="Raccourci Google"
-          style={({ pressed }) => [styles.googleTile, { opacity: pressed ? 0.8 : 1 }]}
+          style={({ pressed }) => [
+            styles.googleTile,
+            { opacity: suspended ? 0.4 : pressed ? 0.8 : 1 },
+          ]}
         >
           <Search color={COLORS.actionFg} size={16} />
           <Text style={styles.googleTileText}>Google</Text>
@@ -233,6 +308,7 @@ export default function BrowseScreen() {
             keyboardAppearance="dark"
             style={styles.input}
             selectTextOnFocus
+            editable={!suspended}
             accessibilityLabel="Adresse ou recherche"
           />
           {navState.loading && (
@@ -241,10 +317,14 @@ export default function BrowseScreen() {
         </View>
 
         <Pressable
+          disabled={suspended}
           onPress={submit}
           hitSlop={6}
           accessibilityLabel="Aller à l'adresse ou lancer la recherche"
-          style={({ pressed }) => [styles.goButton, { opacity: pressed ? 0.7 : 1 }]}
+          style={({ pressed }) => [
+            styles.goButton,
+            { opacity: suspended ? 0.4 : pressed ? 0.7 : 1 },
+          ]}
         >
           <ArrowUpRight color={COLORS.actionFg} size={20} />
         </Pressable>
@@ -253,19 +333,20 @@ export default function BrowseScreen() {
       <View style={styles.toolbar}>
         {renderToolbarButton({
           onPress: () => webRef.current?.goBack(),
-          disabled: !navState.canGoBack,
+          disabled: suspended || !navState.canGoBack,
           accessibilityLabel: "Page précédente",
           children: <ChevronLeft color={COLORS.textPrimary} size={20} />,
         })}
         {renderToolbarButton({
           onPress: () => webRef.current?.goForward(),
-          disabled: !navState.canGoForward,
+          disabled: suspended || !navState.canGoForward,
           accessibilityLabel: "Page suivante",
           children: <ChevronRight color={COLORS.textPrimary} size={20} />,
         })}
         {renderToolbarButton({
           onPress: () =>
             navState.loading ? webRef.current?.stopLoading() : webRef.current?.reload(),
+          disabled: suspended,
           accessibilityLabel: navState.loading ? "Arrêter le chargement" : "Actualiser",
           children: (
             <View style={styles.refreshWrap}>
@@ -279,10 +360,14 @@ export default function BrowseScreen() {
         })}
         <View style={styles.toolbarSpacer} />
         <Pressable
+          disabled={suspended}
           onPress={() => navigate(GOOGLE_HOME_URL)}
           hitSlop={6}
           accessibilityLabel="Accueil Google"
-          style={({ pressed }) => [styles.toolButton, { opacity: pressed ? 0.7 : 1 }]}
+          style={({ pressed }) => [
+            styles.toolButton,
+            { opacity: suspended ? 0.35 : pressed ? 0.7 : 1 },
+          ]}
         >
           <House color={COLORS.textPrimary} size={19} />
         </Pressable>
@@ -296,31 +381,39 @@ export default function BrowseScreen() {
       ) : null}
 
       <View style={styles.webArea}>
-        <View style={styles.webFrame}>
-          <WebView
-            ref={webRef}
-            source={{ uri: sourceUrl }}
-            style={styles.webview}
-            startInLoadingState
-            javaScriptEnabled
-            domStorageEnabled
-            thirdPartyCookiesEnabled
-            decelerationRate="normal"
-            allowsBackForwardNavigationGestures
-            setSupportMultipleWindows={false}
-            originWhitelist={["http://*", "https://"]}
-            mixedContentMode="never"
-            allowsFullscreenVideo={false}
-            injectedJavaScript={NEW_WINDOW_HANDLER_JS}
-            onShouldStartLoadWithRequest={shouldStartLoad}
-            onLoadStart={handleLoadStart}
-            onNavigationStateChange={handleNavigationStateChange}
-            onError={handleWebError}
-            onHttpError={handleHttpError}
+        {suspended ? (
+          <BrowseSuspensionScreen
+            reason={suspendReason ?? "no_session"}
+            onGoHome={() => router.push("/(app)/(tabs)/dashboard")}
           />
-        </View>
+        ) : (
+          <View style={styles.webFrame}>
+            <WebView
+              key={`web-${resumeNonce}`}
+              ref={webRef}
+              source={{ uri: sourceUrl }}
+              style={styles.webview}
+              startInLoadingState
+              javaScriptEnabled
+              domStorageEnabled
+              thirdPartyCookiesEnabled
+              decelerationRate="normal"
+              allowsBackForwardNavigationGestures
+              setSupportMultipleWindows={false}
+              originWhitelist={["http://*", "https://*"]}
+              mixedContentMode="never"
+              allowsFullscreenVideo={false}
+              injectedJavaScript={NEW_WINDOW_HANDLER_JS}
+              onShouldStartLoadWithRequest={shouldStartLoad}
+              onLoadStart={handleLoadStart}
+              onNavigationStateChange={handleNavigationStateChange}
+              onError={handleWebError}
+              onHttpError={handleHttpError}
+            />
+          </View>
+        )}
 
-        {loadError && (
+        {!suspended && loadError && (
           <View style={styles.errorOverlay}>
             <View style={styles.errorIcon}>
               <AlertTriangle color={COLORS.warning} size={26} />
@@ -348,6 +441,14 @@ export default function BrowseScreen() {
             </View>
           </View>
         )}
+      </View>
+
+      {/* Bande publicitaire persistante : frère de la WebView (jamais un
+          overlay), hors du contenu web et de tout défilement. Elle occupe
+          une place réservée en bas de l'écran, au-dessus des onglets, et
+          affiche la vraie création (même source de campagne, même session). */}
+      <View style={styles.adStripWrap}>
+        <BrowseAdBanner variant="strip" />
       </View>
     </View>
   );
@@ -425,7 +526,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(245, 158, 11, 0.1)",
   },
   noticeText: { flex: 1, color: COLORS.warning, fontSize: 11.5, fontFamily: "Inter-Regular" },
-  webArea: { flex: 1, marginTop: 10, marginHorizontal: 20, marginBottom: 0 },
+  webArea: { flex: 1, flexShrink: 1, marginTop: 10, marginHorizontal: 20, marginBottom: 0 },
+  // Zone publicitaire réservée : jamais compressée sous sa hauteur lisible
+  // (flexShrink 0) — c'est la WebView au-dessus qui se réduit si besoin.
+  adStripWrap: { flexShrink: 0, marginTop: 12 },
   webFrame: {
     flex: 1,
     borderRadius: RADIUS.lg,

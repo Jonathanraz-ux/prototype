@@ -3,7 +3,7 @@ import { ExpoConfig } from "expo/config";
 const config: ExpoConfig = {
   name: "Bôjô",
   slug: "wifi-zone",
-  version: "1.1.1",
+  version: "1.2.0",
   orientation: "portrait",
   icon: "./src/assets/images/bojo-icon-square.png",
   scheme: "bojo",
@@ -31,7 +31,7 @@ const config: ExpoConfig = {
     // ce nom FERME la mise à jour en place (signature identique obligatoire
     // sur un package inchangé) → préserver à moins de conflit démontré.
     package: "com.wifizone.app",
-    versionCode: 3,
+    versionCode: 7,
     permissions: ["INTERNET", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE"],
     jsEngine: "hermes"
   },

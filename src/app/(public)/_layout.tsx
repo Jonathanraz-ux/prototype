@@ -4,9 +4,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import { COLORS } from "../../constants/theme";
 
 export default function PublicLayout() {
-  const { isLoading } = useAuth();
+  const { isRestoring } = useAuth();
 
-  if (isLoading) {
+  if (isRestoring) {
     return (
       <View className="flex-1 items-center justify-center" style={{ backgroundColor: COLORS.background }}>
         <ActivityIndicator color={COLORS.accent} size="large" />

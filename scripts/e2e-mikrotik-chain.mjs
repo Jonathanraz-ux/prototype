@@ -4,9 +4,11 @@
 // MockRouter (compteurs simulés).
 //
 //   NETWORK_HMAC_SECRET=<secret-serveur> AGENT_TOKEN=<token-agent> \
-//   [SUPABASE_URL=...] [DEMO_EMAIL=...] [DEMO_PASSWORD=...] \
-//   [SITE_ID=...] [EXEC_AGENT=1] \
-//   node scripts/e2e-mikrotik-chain.mjs
+//   [EXEC_AGENT=1] node scripts/e2e-mikrotik-chain.mjs
+//
+// Clés lues depuis .env (EXPO_PUBLIC_SUPABASE_URL/ANON_KEY,
+// EXPO_PUBLIC_DEMO_PASSWORD, EXPO_PUBLIC_DEFAULT_SITE_ID) avec
+// surcharges par variables d'environnement. Aucun secret en dur.
 //
 // Flux validé :
 //   JWT utilisateur → request-wifi-session (begin_network_session SQL)
@@ -14,12 +16,13 @@
 //   → agent-command-result (sets router_session_reference)
 //   → quota-status = active → compteurs agent-collect → end-wifi-session.
 //
-// NOTE : le test S'INSCRIT dans le vrai projet Supabase ; il crée une
+// NOTE : le test S'INSRIT dans le vrai projet Supabase ; il crée une
 // vraie session (quota démo 5 Go). Les sessions sont soldées en fin de
 // test. N'exécuter que sur l'environnement de TEST.
 // ============================================================
 
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentEngine } from "../agent/engine.mjs";
 import { MockRouter } from "../agent/lib/mock-router.mjs";
@@ -28,15 +31,25 @@ import { loadAgentEnv } from "../agent/config.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
+const envRaw = readFileSync(join(ROOT, ".env"), "utf8");
+const getEnv = (k) => {
+  const m = envRaw.match(new RegExp(`^${k}=(.+)$`, "m"));
+  return m ? m[1].trim() : "";
+};
 const SUPABASE_URL =
-  process.env.SUPABASE_URL ?? "https://hwwivzsdepzdgonfbkxq.supabase.co";
+  process.env.SUPABASE_URL ?? getEnv("EXPO_PUBLIC_SUPABASE_URL");
 const BASE = `${SUPABASE_URL.replace(/\/$/, "")}/functions/v1`;
-const PUBLIC = process.env.SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_073mrmQaC-H6oBfU-Fg52g_7MUCvjrs";
+const PUBLIC =
+  process.env.SUPABASE_PUBLISHABLE_KEY ?? getEnv("EXPO_PUBLIC_SUPABASE_ANON_KEY");
 
 const DEMO_EMAIL = process.env.DEMO_EMAIL ?? "demo@wifizone.app";
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? "B0j0-demo-2026!";
-const SITE_ID =
-  process.env.SITE_ID ?? "d9fe1d87-b4a8-4b92-8ebc-d213b2929e8d";
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? getEnv("EXPO_PUBLIC_DEMO_PASSWORD");
+const SITE_ID = process.env.SITE_ID ?? getEnv("EXPO_PUBLIC_DEFAULT_SITE_ID");
+
+if (!SUPABASE_URL || !PUBLIC || !DEMO_PASSWORD || !SITE_ID) {
+  console.error("Clés manquantes : renseignez .env (ou les variables dédiées).");
+  process.exit(1);
+}
 
 const HMAC_SECRET = process.env.NETWORK_HMAC_SECRET;
 const AGENT_TOKEN = process.env.AGENT_TOKEN;

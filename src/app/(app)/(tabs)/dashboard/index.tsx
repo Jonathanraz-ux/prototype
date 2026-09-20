@@ -5,12 +5,13 @@ import { useRouter } from "expo-router";
 import { COLORS } from "../../../../constants/theme";
 import { useAuth } from "../../../../contexts/AuthContext";
 import { useConnection } from "../../../../contexts/ConnectionContext";
-import { Play, Power, AlertTriangle, ServerCog, Wrench } from "lucide-react-native";
+import { Play, Power, AlertTriangle, ServerCog, Wrench, RefreshCw } from "lucide-react-native";
 import HeroAdCard from "../../../../components/HeroAdCard";
 import ConnectionStatusCard from "../../../../components/ConnectionStatusCard";
 import AppHeader from "../../../../components/AppHeader";
 import RefreshButton from "../../../../components/RefreshButton";
 import { isDevModeEnabled } from "../../../../lib/config";
+import { TAB_BAR_CLEARANCE, TAB_BAR_MARGIN } from "../../../../lib/tabBarMetrics";
 import { ScrollView } from "react-native";
 
 export default function DashboardScreen() {
@@ -28,6 +29,7 @@ export default function DashboardScreen() {
     networkHealth,
     networkProviderKind,
     lastSyncAt,
+    isResuming,
   } = useConnection();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -65,7 +67,6 @@ export default function DashboardScreen() {
     if (
       state === "ad_loading" ||
       state === "ad_active" ||
-      state === "authorizing_wifi" ||
       state === "disconnecting" ||
       (state === "idle" && currentAd)
     ) {
@@ -88,9 +89,20 @@ export default function DashboardScreen() {
       return (
         <Pressable
           onPress={handleConnect}
-          style={({ pressed }) => [styles.actionButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
+          disabled={isResuming}
+          style={({ pressed }) => [
+            styles.actionButton,
+            {
+              opacity: isResuming ? 0.85 : 1,
+              transform: [{ scale: pressed && !isResuming ? 0.97 : 1 }],
+            },
+          ]}
         >
-          <Text style={styles.actionButtonText}>Reprendre la session</Text>
+          {isResuming ? (
+            <ActivityIndicator size="small" color={COLORS.actionFg} />
+          ) : (
+            <Text style={styles.actionButtonText}>Reprendre la session</Text>
+          )}
         </Pressable>
       );
     }
@@ -111,6 +123,20 @@ export default function DashboardScreen() {
             <Text style={styles.actionButtonText}>Vérifier le quota</Text>
           </Pressable>
         </View>
+      );
+    }
+
+    if (state === "authorizing_wifi") {
+      // Cul-de-sac : autorisation restée sans aboutissement. Le bouton
+      // relance proprement la connexion (connect() repart de idle).
+      return (
+        <Pressable
+          onPress={handleConnect}
+          style={({ pressed }) => [styles.actionButton, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}
+        >
+          <RefreshCw color={COLORS.actionFg} size={20} />
+          <Text style={styles.actionButtonText}>Réessayer l'autorisation Wi-Fi</Text>
+        </Pressable>
       );
     }
 
@@ -156,7 +182,7 @@ export default function DashboardScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 110 }]}
+        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + TAB_BAR_MARGIN }]}
         showsVerticalScrollIndicator={false}
       >
         <Animated.View style={{ gap: 14, opacity: fadeAnim }}>
@@ -177,6 +203,7 @@ export default function DashboardScreen() {
             networkHealth={networkHealth}
             providerKind={networkProviderKind}
             lastSyncAt={lastSyncAt}
+            meterTrusted={networkProviderKind === "live"}
           />
 
           <View style={{ height: 260 }}>
@@ -219,7 +246,8 @@ const styles = StyleSheet.create({
   stateNote: { color: COLORS.textMuted, fontSize: 12.5, textAlign: "center", fontFamily: "Inter-Regular" },
   reason: { color: COLORS.warning, fontSize: 12, textAlign: "center", fontFamily: "Inter-Regular" },
   actionButton: {
-    height: 56,
+    minHeight: 56,
+    paddingVertical: 14,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
@@ -234,7 +262,8 @@ const styles = StyleSheet.create({
   },
   actionButtonText: { color: COLORS.actionFg, fontSize: 15.5, fontFamily: "Inter-Bold" },
   disconnectButton: {
-    height: 56,
+    minHeight: 56,
+    paddingVertical: 14,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",

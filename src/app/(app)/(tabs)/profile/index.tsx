@@ -8,11 +8,12 @@ import { useAuth } from "../../../../contexts/AuthContext";
 import { useConnection } from "../../../../contexts/ConnectionContext";
 import { formatDurationFR, formatDataFR } from "../../../../components/ConnectionStatusCard";
 import AppHeader from "../../../../components/AppHeader";
+import { TAB_BAR_CLEARANCE, TAB_BAR_MARGIN } from "../../../../lib/tabBarMetrics";
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, logout } = useAuth();
-  const { usage } = useConnection();
+  const { usage, networkProviderKind } = useConnection();
   const insets = useSafeAreaInsets();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [loading, setLoading] = useState(true);
@@ -44,7 +45,7 @@ export default function ProfileScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 110 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + TAB_BAR_MARGIN }}
         showsVerticalScrollIndicator={false}
       >
         <Animated.View style={{ gap: 8, opacity: fadeAnim }}>
@@ -68,30 +69,41 @@ export default function ProfileScreen() {
               <Sparkles color={COLORS.accent} size={14} />
               <Text style={styles.cardHeaderText}>Internet financé par la publicité</Text>
             </View>
-            <View style={styles.metrics}>
-              <View style={styles.metric}>
-                <View style={styles.metricIcon}>
-                  <HardDrive color={COLORS.accent} size={18} />
+            {networkProviderKind === "live" ? (
+              <View style={styles.metrics}>
+                <View style={styles.metric}>
+                  <View style={styles.metricIcon}>
+                    <HardDrive color={COLORS.accent} size={18} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.metricLabel}>Données restantes</Text>
+                    <Text style={styles.metricValue}>
+                      {formatDataFR(usage.remainingQuotaMB)} sur {formatDataFR(usage.totalQuotaMB)}
+                    </Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.metricLabel}>Données restantes</Text>
-                  <Text style={styles.metricValue}>
-                    {formatDataFR(usage.remainingQuotaMB)} sur {formatDataFR(usage.totalQuotaMB)}
-                  </Text>
+                <View style={styles.metric}>
+                  <View style={styles.metricIcon}>
+                    <Clock color={COLORS.accent} size={18} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.metricLabel}>Temps restant</Text>
+                    <Text style={styles.metricValue}>
+                      {formatDurationFR(usage.remainingTimeMinutes)} sur {formatDurationFR(usage.totalTimeMinutes)}
+                    </Text>
+                  </View>
                 </View>
               </View>
-              <View style={styles.metric}>
-                <View style={styles.metricIcon}>
-                  <Clock color={COLORS.accent} size={18} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.metricLabel}>Temps restant</Text>
-                  <Text style={styles.metricValue}>
-                    {formatDurationFR(usage.remainingTimeMinutes)} sur {formatDurationFR(usage.totalTimeMinutes)}
-                  </Text>
-                </View>
+            ) : (
+              <View style={styles.honestRow}>
+                <HardDrive color={COLORS.primaryLight} size={14} />
+                <Text style={styles.honestText}>
+                  Bôjô offre un quota de 5 Go. Le comptage sera mesuré par le routeur
+                  (MikroTik) lors de la phase définitive — les compteurs ne sont pas
+                  encore actifs en mode provisoire.
+                </Text>
               </View>
-            </View>
+            )}
           </View>
 
           <Pressable
@@ -189,6 +201,23 @@ const styles = StyleSheet.create({
   },
   metricLabel: { color: COLORS.textMuted, fontSize: 11, fontFamily: "Inter-Regular" },
   metricValue: { color: COLORS.textPrimary, fontSize: 14, marginTop: 2, fontFamily: "Inter-Bold" },
+  honestRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    padding: 12
+  },
+  honestText: {
+    flex: 1,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: "Inter-Regular"
+  },
   row: {
     borderRadius: 18,
     borderWidth: 1,

@@ -1,11 +1,22 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ActivityIndicator, Pressable, StyleSheet } from "react-native";
+import { View, Text, ActivityIndicator, Pressable, StyleSheet, Image, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { Megaphone, Sparkles, AlertTriangle, Play, Pause, Info } from "lucide-react-native";
 import { COLORS, RADIUS } from "../constants/theme";
 import { useConnection } from "../contexts/ConnectionContext";
+import { useIsFocusedScreen } from "../hooks/useIsFocusedScreen";
+import { browseStripHeight } from "../lib/browseAdStrip";
 import AdMedia from "./AdMedia";
+
+export interface BrowseAdBannerProps {
+  /**
+   * "top" : bandeau au-dessus du contenu (comportement historique, 96 de haut).
+   * "strip" : bande persistante du navigateur, zone RÉELLEMENT réservée en bas
+   * de l'écran (au-dessus des onglets), hauteur adaptée au format de campagne.
+   */
+  variant?: "top" | "strip";
+}
 
 /**
  * BrowseAdBanner — Publicité persistante du navigateur.
@@ -16,12 +27,18 @@ import AdMedia from "./AdMedia";
  * mécanisme central de connexion (aucune injection dans les pages tierces,
  * aucune nouvelle source de vérité de visibilité).
  *
- * Pendant une session active, le média tourne en boucle : le mécanisme
- * central re-contrôle la session par heartbeat ; si l'affichage ne peut pas
- * être conservé, l'arrière-plan provoque déjà la suspension centrale
- * (ConnectionContext → paused + blocage vpn).
+ * La bande persistante ne couvre jamais la page : elle est un frère de la
+ * WebView, réservée dans la mise en page (pas de position absolue), alignée
+ * au-dessus de la barre d'onglets. Pendant une session active, le média
+ * tourne en boucle : le mécanisme central re-contrôle la session par
+ * heartbeat ; si l'affichage ne peut pas être conservé, l'arrière-plan
+ * provoque déjà la suspension centrale (ConnectionContext → paused + blocage vpn).
+ *
+ * Un seul lecteur actif à la fois : la lecture et l'émission des événements
+ * sont interrompues quand l'onglet n'est pas au premier plan (garde focus),
+ * ce qui évite deux vidéos et deux sources de progression simultanées.
  */
-export default function BrowseAdBanner() {
+export default function BrowseAdBanner({ variant = "top" }: BrowseAdBannerProps) {
   const router = useRouter();
   const {
     currentAd,
@@ -35,8 +52,13 @@ export default function BrowseAdBanner() {
     handleAdMediaError,
   } = useConnection();
 
+  const isFocused = useIsFocusedScreen();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+
   const [mediaFailed, setMediaFailed] = useState(false);
   const [isPlayingRequested, setIsPlayingRequested] = useState(true);
+  // Proportions intrinsèques d'une création image (h/w), mesurées une fois.
+  const [imageRatio, setImageRatio] = useState<number | null>(null);
 
   const isWatching = state === "ad_active" || state === "ad_loading";
   const isConnected = state === "wifi_active";
@@ -53,6 +75,51 @@ export default function BrowseAdBanner() {
       setIsPlayingRequested(true);
     }
   }, [currentAd?.id, state]);
+
+  // Transfert de focus (ex. Accueil → Naviguer) pendant une session autorisée
+  // ou un visionnage : la publicité reprend d'elle-même. Elle n'est jamais
+  // laissée figée dans un onglet après une reprise centrale — l'intention de
+  // lecture locale d'un onglet n'écrase pas l'état autorisé du mécanisme
+  // central. La pause VOLONTAIRE sur l'onglet courant (state "paused") n'est
+  // pas concernée.
+  useEffect(() => {
+    if (isFocused && (state === "wifi_active" || state === "ad_active")) {
+      setIsPlayingRequested(true);
+    }
+  }, [isFocused, state]);
+
+  // Mesure en lecture seule des proportions de la création image : la bande
+  // s'adapte au format au lieu d'imposer une hauteur arbitraire (et par
+  // défaut contient le média sans le déformer ni le couper).
+  useEffect(() => {
+    if (variant !== "strip" || !currentAd || currentAd.type !== "image") {
+      setImageRatio(null);
+      return;
+    }
+    let alive = true;
+    Image.getSize(
+      currentAd.mediaUrl,
+      (w, h) => {
+        if (alive && w > 0) setImageRatio(h / w);
+      },
+      () => {
+        if (alive) setImageRatio(null);
+      }
+    );
+    return () => {
+      alive = false;
+    };
+  }, [variant, currentAd?.id, currentAd?.type, currentAd?.mediaUrl]);
+
+  const isStrip = variant === "strip";
+  const bannerHeight = isStrip
+    ? browseStripHeight({
+        usableWidth: Math.max(1, windowWidth - 40),
+        screenHeight: Math.max(1, windowHeight),
+        format: currentAd?.type ?? "video",
+        imageRatio,
+      })
+    : 96;
 
   const togglePlayback = () => {
     if (isWatching) {
@@ -76,7 +143,7 @@ export default function BrowseAdBanner() {
 
   if (!currentAd) {
     return (
-      <View style={[styles.banner, styles.hintBanner]}>
+      <View style={[styles.banner, styles.hintBanner, { height: bannerHeight }]}>
         <View style={styles.pubBadge}>
           <Megaphone color={COLORS.white} size={11} strokeWidth={2.5} />
           <Text style={styles.pubText}>PUB</Text>
@@ -110,7 +177,7 @@ export default function BrowseAdBanner() {
     <Pressable
       onPress={togglePlayback}
       accessibilityLabel={adOnScreen ? "Publicité — contrôler la lecture" : "Publicité — regarder et se connecter"}
-      style={({ pressed }) => [styles.banner, { opacity: pressed ? 0.94 : 1 }]}
+      style={({ pressed }) => [styles.banner, { height: bannerHeight, opacity: pressed ? 0.94 : 1 }]}
     >
       <LinearGradient
         colors={gradient}
@@ -122,14 +189,19 @@ export default function BrowseAdBanner() {
       {!mediaFailed ? (
         <AdMedia
           ad={currentAd}
-          shouldPlay={adOnScreen && isPlayingRequested}
+          shouldPlay={adOnScreen && isPlayingRequested && isFocused}
           isLooping={loopMode}
+          mediaResizeMode={isStrip ? "contain" : "cover"}
           onError={() => {
             setMediaFailed(true);
-            void handleAdMediaError("Échec de lecture du média publicitaire");
+            if (isFocused) {
+              void handleAdMediaError("Échec de lecture du média publicitaire");
+            }
           }}
           onPlaybackStatusUpdate={(status) => {
-            void handlePlaybackStatusUpdate(status);
+            if (isFocused) {
+              void handlePlaybackStatusUpdate(status);
+            }
           }}
         />
       ) : (
@@ -191,7 +263,6 @@ export default function BrowseAdBanner() {
 
 const styles = StyleSheet.create({
   banner: {
-    height: 96,
     borderRadius: RADIUS.xl,
     overflow: "hidden",
     borderWidth: 1,

@@ -15,6 +15,7 @@ import type { User, RegisterData } from "../types";
 export interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
+  isRestoring: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
   isSiteManager: boolean;
@@ -35,6 +36,10 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Restauration de session au démarrage uniquement : les écrans publics
+  // restent montés pendant login/register, sinon l'erreur inline est perdue
+  // (BUG v6-1 : rebond du formulaire vers l'accueil).
+  const [isRestoring, setIsRestoring] = useState(true);
 
   const loadSession = useCallback(async () => {
     try {
@@ -50,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
     } finally {
       setIsLoading(false);
+      setIsRestoring(false);
     }
   }, []);
 
@@ -64,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (event === "SIGNED_OUT") {
         setUser(null);
         setIsLoading(false);
+        setIsRestoring(false);
       } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
         if (session?.user) {
           AuthService.getCurrentUser().then(setUser);
@@ -136,6 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       isLoading,
+      isRestoring,
       isAuthenticated: !!user,
       isAdmin: user?.role === "organization_admin" || user?.role === "super_admin",
       isSiteManager:
@@ -149,7 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       requestPasswordReset,
       refreshUser,
     }),
-    [user, isLoading, login, register, logout, updateProfile, requestPasswordReset, refreshUser]
+    [user, isLoading, isRestoring, login, register, logout, updateProfile, requestPasswordReset, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

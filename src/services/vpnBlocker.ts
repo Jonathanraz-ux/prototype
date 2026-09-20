@@ -25,6 +25,14 @@ export interface VpnBlockerEvent {
   state: VpnState;
   tunnelUp: boolean;
   authExpiresAt: number;
+  /**
+   * Temps restant d'autorisation calculé côté natif (horloge
+   * elapsedRealtime, insensible aux changements d'heure/fuseau). C'est la
+   * vraie source de vérité : authExpiresAt reste exposé en compatibilité
+   * mais repose sur l'horloge épochable et ne doit plus être comparé à
+   * Date.now().
+   */
+  ttlLeftMs?: number;
   generation: number;
 }
 
@@ -206,6 +214,7 @@ class VpnBlockerService {
         state: raw.state as VpnState,
         tunnelUp: Boolean(raw.tunnelUp),
         authExpiresAt: Number(raw.authExpiresAt ?? 0),
+        ttlLeftMs: Number.isFinite(Number(raw.ttlLeftMs)) ? Number(raw.ttlLeftMs) : undefined,
         generation: evtGeneration,
       });
     });

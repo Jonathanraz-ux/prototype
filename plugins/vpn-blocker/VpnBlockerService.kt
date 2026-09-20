@@ -351,6 +351,7 @@ class VpnBlockerService : VpnService() {
         putString("state", state)
         putBoolean("tunnelUp", isTunnelUp())
         putDouble("authExpiresAt", authMs.toDouble())
+        putDouble("ttlLeftMs", ttlLeft.toDouble())
         putDouble("generation", gen.toDouble())
       }
     )

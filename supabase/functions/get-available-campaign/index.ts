@@ -24,16 +24,31 @@ export async function getAvailableCampaign(req: Request): Promise<Response> {
     return fail("Jeton invalide ou expiré", 401, "unauthorized");
   }
 
-  // Organisation de l'utilisateur + statut.
-  const { data: profile } = await supabase
+  // Organisation de l'utilisateur + statut. Un compte auto-inscrit sans
+  // organisation est rattaché automatiquement à l'organisation de démo :
+  // sans cela, l'accès restait coupé à la racine (no_organization) et il
+  // n'y avait jamais de campagne proposable.
+  let profile = await supabase
     .from("profiles")
     .select("organization_id, status, role")
     .eq("id", user.id)
     .maybeSingle();
-  if (!profile?.organization_id) {
+
+  let orgId = profile?.organization_id ?? null;
+  if (!orgId) {
+    const { data: onboard } = await supabase.rpc("bujo_onboard_org", {
+      p_user_id: user.id,
+    });
+    orgId = (onboard as { organization_id?: string } | null)?.organization_id ?? null;
+    if (orgId) {
+      profile = { organization_id: orgId, status: "active", role: "user" };
+    }
+  }
+  if (!orgId) {
     return ok({ reason: "suspended" });
   }
-  if (profile.status && profile.status !== "active") {
+
+  if (profile?.status && profile.status !== "active") {
     return ok({ reason: "suspended" });
   }
 
@@ -41,7 +56,7 @@ export async function getAvailableCampaign(req: Request): Promise<Response> {
   const { data: org } = await supabase
     .from("organizations")
     .select("status")
-    .eq("id", profile.organization_id)
+    .eq("id", orgId)
     .maybeSingle();
   if (!org || (org.status && org.status !== "active")) {
     return ok({ reason: "suspended" });
@@ -53,7 +68,7 @@ export async function getAvailableCampaign(req: Request): Promise<Response> {
   const { data: campaigns, error: campErr } = await supabase
     .from("ad_campaigns")
     .select("*")
-    .eq("organization_id", profile.organization_id)
+    .eq("organization_id", orgId)
     .eq("status", "active")
     .or(`starts_at.is.null,starts_at.lte.${now}`)
     .or(`ends_at.is.null,ends_at.gte.${now}`)
@@ -102,7 +117,10 @@ function nextMidnight(): string {
 function mapCampaign(row: Record<string, unknown>) {
   const media = (row.media_url as string) ?? "";
   return {
-    id: row.id,
+    // Campagne de repli : identifiant symbolique du mode démo → le client
+    // lit la vidéo LOCALE embarquée (chargement instantané, sans réseau),
+    // au lieu de streamer media_url (lent sur liaison mobile faible).
+    id: row.is_fallback ? "demo-campaign-video" : row.id,
     title: row.title ?? "",
     advertiserName: row.advertiser_name ?? "",
     mediaUrl: media,

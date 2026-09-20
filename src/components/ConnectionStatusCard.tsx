@@ -30,6 +30,13 @@ interface ConnectionStatusCardProps {
   networkHealth?: string;
   providerKind?: NetworkProviderKind;
   lastSyncAt?: string | null;
+  /**
+   * true uniquement si le compteur provient réellement du routeur (MikroTik,
+   * providerKind "live"). En mode provisoire (simulé / non configuré), les
+   * métriques de quota sont masquées au profit d'une note honnête : le
+   * téléphone ne mesure pas la données traversant le point d'accès.
+   */
+  meterTrusted?: boolean;
 }
 
 const PROVIDER_LABEL: Record<NetworkProviderKind, string | null> = {
@@ -48,7 +55,8 @@ export default function ConnectionStatusCard({
   totalQuotaMB = 0,
   networkHealth,
   providerKind,
-  lastSyncAt
+  lastSyncAt,
+  meterTrusted = false
 }: ConnectionStatusCardProps) {
   const statusColor = connected ? COLORS.success : connecting ? COLORS.warning : COLORS.textMuted;
   const statusLabel = connected ? "Wi-Fi gratuit actif" : connecting ? "Autorisation en cours" : "Accès coupé";
@@ -78,40 +86,55 @@ export default function ConnectionStatusCard({
         </View>
       </View>
 
-      <View style={styles.percentRow}>
-        <Text style={styles.percent}>{Math.round(percent)}%</Text>
-        <Text style={styles.percentLabel}>de quota restant</Text>
-      </View>
+      {meterTrusted ? (
+        <>
+          <View style={styles.percentRow}>
+            <Text style={styles.percent}>{Math.round(percent)}%</Text>
+            <Text style={styles.percentLabel}>de quota restant</Text>
+          </View>
 
-      {(totalQuotaMB > 0) && (
-        <Text style={styles.quotaType}>
-          Quota initial : {formatDataFR(totalQuotaMB)} · consommé : {formatDataFR(consumedMB)}
-        </Text>
+          {totalQuotaMB > 0 && (
+            <Text style={styles.quotaType}>
+              Quota initial : {formatDataFR(totalQuotaMB)} · consommé : {formatDataFR(consumedMB)}
+            </Text>
+          )}
+
+          <View style={styles.divider} />
+
+          <View style={styles.metricsRow}>
+            <View style={styles.metric}>
+              <View style={styles.metricIcon}>
+                <Clock color={connected ? COLORS.accent : COLORS.textMuted} size={15} />
+              </View>
+              <View>
+                <Text style={styles.metricLabel}>Temps restant</Text>
+                <Text style={styles.metricValue}>{connected ? formatDurationFR(timeMinutes) : "--"}</Text>
+              </View>
+            </View>
+            <View style={styles.metricDivider} />
+            <View style={styles.metric}>
+              <View style={styles.metricIcon}>
+                <HardDrive color={connected ? COLORS.accent : COLORS.textMuted} size={15} />
+              </View>
+              <View>
+                <Text style={styles.metricLabel}>Données restantes</Text>
+                <Text style={styles.metricValue}>{connected ? formatDataFR(quotaMB) : "--"}</Text>
+              </View>
+            </View>
+          </View>
+        </>
+      ) : (
+        <View style={styles.honestWrap}>
+          <View style={styles.honestRow}>
+            <HardDrive color={COLORS.primaryLight} size={14} />
+            <Text style={styles.honestText}>
+              Bôjô offre un quota de 5 Go. Le comptage sera mesuré par le routeur
+              (MikroTik) lors de la phase définitive — les compteurs ne sont pas
+              encore actifs en mode provisoire.
+            </Text>
+          </View>
+        </View>
       )}
-
-      <View style={styles.divider} />
-
-      <View style={styles.metricsRow}>
-        <View style={styles.metric}>
-          <View style={styles.metricIcon}>
-            <Clock color={connected ? COLORS.accent : COLORS.textMuted} size={15} />
-          </View>
-          <View>
-            <Text style={styles.metricLabel}>Temps restant</Text>
-            <Text style={styles.metricValue}>{connected ? formatDurationFR(timeMinutes) : "--"}</Text>
-          </View>
-        </View>
-        <View style={styles.metricDivider} />
-        <View style={styles.metric}>
-          <View style={styles.metricIcon}>
-            <HardDrive color={connected ? COLORS.accent : COLORS.textMuted} size={15} />
-          </View>
-          <View>
-            <Text style={styles.metricLabel}>Données restantes</Text>
-            <Text style={styles.metricValue}>{connected ? formatDataFR(quotaMB) : "--"}</Text>
-          </View>
-        </View>
-      </View>
 
       {(networkHealth || lastSyncAt) && (
         <View style={styles.footer}>
@@ -276,6 +299,26 @@ const styles = StyleSheet.create({
   syncText: {
     color: COLORS.textMuted,
     fontSize: 11,
+    fontFamily: "Inter-Regular"
+  },
+  honestWrap: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    padding: 12
+  },
+  honestRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8
+  },
+  honestText: {
+    flex: 1,
+    color: COLORS.textSecondary,
+    fontSize: 11.5,
+    lineHeight: 17,
     fontFamily: "Inter-Regular"
   }
 });
