@@ -22,6 +22,30 @@ type FunctionResponse<T> =
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
+/**
+ * Fetch avec délai BORNÉ puis abandon RÉEL de la requête (AbortController).
+ * Le Promise.race qui appelle cette fonction garde le motif typé (timeout) ;
+ * l'abandon sert ici à libérer la connexion réseau plutôt que de laisser une
+ * requête zombie en vol. Sans AbortController (environnement sans support),
+ * on reste sur un fetch simple : le délai est toujours garanti par le race.
+ */
+async function fetchBounded(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  if (typeof AbortController !== "undefined") {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return fetch(url, init);
+}
+
 /** Jeton actuellement disponible (cache + reconnexion si expiré). */
 export async function getApiToken(): Promise<string> {
   let token = getAccessToken();
@@ -61,15 +85,19 @@ export async function callRpc<T>(
 
   try {
     const response = await Promise.race([
-      fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${token}`,
+      fetchBounded(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body ?? {}),
         },
-        body: JSON.stringify(body ?? {}),
-      }),
+        timeoutMs
+      ),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new FunctionError("Délai dépassé", "timeout", 408)), timeoutMs)
       ),
@@ -155,15 +183,19 @@ export async function callFunction<T>(
 
   try {
     const response = await Promise.race([
-      fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${token}`,
+      fetchBounded(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: config.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body ?? {}),
         },
-        body: JSON.stringify(body ?? {}),
-      }),
+        timeoutMs
+      ),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new FunctionError("Délai dépassé", "timeout", 408)), timeoutMs)
       ),

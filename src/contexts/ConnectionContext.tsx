@@ -102,6 +102,16 @@ export interface ConnectionContextValue {
   networkMode: NetworkMode;
   vpnStatus: VpnBlockerStatus | null;
   isResuming: boolean;
+  /**
+   * Compteur de VISIONNAGES : incrémenté à chaque nouveau start-ad-view.
+   * Casse l'écueil du lecteur expo-av qui, recyclé par la clé de campagne
+   * constante, restait bloqué en fin de vidéo et ne rejouait pas : la clé
+   * du lecteur devient campagne:visionnage → chaque nouveau passage remonte
+   * le lecteur depuis le début (didJustFinish fiable pour la validation).
+   */
+  adViewNonce: number;
+  /** Renouvellement d'autorisation immédiat (battement unique, borné). */
+  renewNow: () => Promise<void>;
   setNetworkMode: (mode: NetworkMode) => void;
   requestVpnConsent: () => Promise<boolean>;
   consumeSimulatedBytes: (bytes: number) => Promise<void>;
@@ -177,6 +187,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [vpnStatus, setVpnStatus] = useState<VpnBlockerStatus | null>(null);
   const [isResuming, setIsResuming] = useState(false);
+  const [adViewNonce, setAdViewNonce] = useState(0);
 
   const stateRef = useRef<ConnectionState>(state);
   stateRef.current = state;
@@ -196,6 +207,12 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const flowGate = useMemo(() => createFlowGate(), []);
   const controlFailuresRef = useRef(0);
   const vpnStatusRef = useRef<VpnBlockerStatus | null>(null);
+  /** Vrai quand un battement est en cours : jamais deux renouvellements concurrents. */
+  const heartbeatInFlightRef = useRef(false);
+  /** Dernière fonction de battement active (réutilisée par renewNow). */
+  const heartbeatRef = useRef<(() => Promise<void>) | null>(null);
+  /** Watchdog explicite de sortie de l'état authorizing_wifi (cul-de-sac). */
+  const authorizeWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateVpnStatus = useCallback((next: VpnBlockerStatus | null) => {
     vpnStatusRef.current = next;
@@ -547,71 +564,116 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     const isVpnDemo = networkMode === "android_vpn_demo";
 
     const beat = async () => {
-      const gen = epochGuard.current;
-      let r;
-      try {
-        r = await adHeartbeat(sessionId);
-      } catch (e) {
-        logger.warn(TAG, "heartbeat impossible", e);
-        if (isVpnDemo) {
-          // Ne JAMAIS prolonger l'autorisation : blocage natif immédiat.
-          vpnBlocker.trace(`heartbeat FAILED -> block + invalidate generation`);
-          await suspendInto("idle", "HEARTBEAT_TIMEOUT");
-        } else {
-          // MikroTik : l'échec de contrôle est compté ; au-delà du seuil,
-          // coupe explicite + ré-autorisation vérifiée (pas d'accès illimité).
-          const exceeded = noteControlFailure();
-          if (exceeded) {
-            await suspendInto("error", "NETWORK_LOST", "suspended");
-          }
-        }
+      // Garde-fou d'unicité : un battement déjà en vol n'est jamais doublé
+      // (échelon 10 s + renewal immédiat au premier plan / au démarrage de
+      // navigation → un seul renouvellement à la fois, jamais de course).
+      if (heartbeatInFlightRef.current) {
+        vpnBlocker.trace("heartbeat skip (déjà en vol)");
         return;
       }
-      if (cancelled || !epochGuard.isCurrent(gen)) return; // réponse tardive ignorée
-
-      const decision = decideHeartbeat(r);
-      switch (decision.action) {
-        case "authorize":
-          noteControlSuccess();
-          if (isVpnDemo && stateRef.current === "wifi_active") {
-            // Renouvellement natif UNIQUEMENT sur confirmation serveur courante,
-            // durée dérivée des DATES SERVEUR (jamais extension locale aveugle).
-            vpnBlocker.trace(
-              `heartbeat ok ttlMs=${decision.ttlMs} base=${r.server_time ?? r.last_heartbeat_at ?? "-"} until=${r.heartbeat_expires_at ?? "-"}`
-            );
-            await vpnBlocker.setAuthorized(decision.ttlMs);
-          }
-          break;
-        case "block":
+      heartbeatInFlightRef.current = true;
+      try {
+        const gen = epochGuard.current;
+        let r;
+        try {
+          r = await adHeartbeat(sessionId);
+        } catch (e) {
+          logger.warn(TAG, "heartbeat impossible", e);
+          // Échec TRANSITOIRE du contrôle (timeout/réseau) : on ne tue pas une
+          // session saine pour une simple noise. L'accès réel reste garanti par
+          // le kill-switch NATIF (échéance 25 s constante, watchdog 500 ms) :
+          // on ne prolonge RIEN, on laisse simplement la prochaine battement
+          // (échelon 10 s) revenir. Au-delà du seuil de défaillances, on coupe.
           if (isVpnDemo) {
-            // Échéance serveur absente/illisible/passée → aucun accès.
-            vpnBlocker.trace(`heartbeat BLOCKED action=block ttl=0 until=${r.heartbeat_expires_at ?? "-"}`);
-            await suspendInto("idle", "HEARTBEAT_TIMEOUT");
+            vpnBlocker.trace("heartbeat FAILED (transitoire) -> retry au prochain échelon");
+            const exceeded = noteControlFailure();
+            if (exceeded) {
+              await suspendInto("idle", "HEARTBEAT_TIMEOUT");
+            }
           } else {
             const exceeded = noteControlFailure();
             if (exceeded) {
               await suspendInto("error", "NETWORK_LOST", "suspended");
             }
           }
-          break;
-        case "require_reauth":
-          // Session fermée/expirée : une NOUVELLE autorisation vérifiée
-          // (publicité ré-regardée) est obligatoire.
-          await suspendInto("idle", decision.reason, "cut", { clearSession: true });
-          break;
-        case "quota_exhausted":
-          await suspendInto("quota_exhausted", "QUOTA_EXHAUSTED");
-          break;
+          return;
+        }
+        if (cancelled || !epochGuard.isCurrent(gen)) return; // réponse tardive ignorée
+
+        const decision = decideHeartbeat(r);
+        switch (decision.action) {
+          case "authorize":
+            noteControlSuccess();
+            if (isVpnDemo && stateRef.current === "wifi_active") {
+              // Renouvellement natif UNIQUEMENT sur confirmation serveur courante,
+              // durée dérivée des DATES SERVEUR (jamais extension locale aveugle).
+              vpnBlocker.trace(
+                `heartbeat ok ttlMs=${decision.ttlMs} base=${r.server_time ?? r.last_heartbeat_at ?? "-"} until=${r.heartbeat_expires_at ?? "-"}`
+              );
+              await vpnBlocker.setAuthorized(decision.ttlMs);
+            } else if (isVpnDemo) {
+              // Session en pause : le tunnel DOIT rester coupé (pas de
+              // renouvellement natif), mais la session serveur reste battue.
+              // Trace explicite : aucun silence théorique du battement.
+              vpnBlocker.trace(
+                `heartbeat ok (paused, pas de renouvellement natif) ttlMs=${decision.ttlMs} until=${r.heartbeat_expires_at ?? "-"}`
+              );
+            }
+            break;
+          case "block":
+            if (isVpnDemo) {
+              // Échéance serveur absente/illisible/passée → aucun accès.
+              vpnBlocker.trace(`heartbeat BLOCKED action=block ttl=0 until=${r.heartbeat_expires_at ?? "-"}`);
+              await suspendInto("idle", "HEARTBEAT_TIMEOUT");
+            } else {
+              const exceeded = noteControlFailure();
+              if (exceeded) {
+                await suspendInto("error", "NETWORK_LOST", "suspended");
+              }
+            }
+            break;
+          case "require_reauth":
+            // Session fermée/expirée : une NOUVELLE autorisation vérifiée
+            // (publicité ré-regardée) est obligatoire.
+            await suspendInto("idle", decision.reason, "cut", { clearSession: true });
+            break;
+          case "quota_exhausted":
+            await suspendInto("quota_exhausted", "QUOTA_EXHAUSTED");
+            break;
+        }
+      } finally {
+        heartbeatInFlightRef.current = false;
       }
     };
 
-    beat();
-    const t = setInterval(beat, HEARTBEAT_INTERVAL_MS);
+    heartbeatRef.current = beat;
+    void beat();
+    const t = setInterval(() => {
+      if (!cancelled) void beat();
+    }, HEARTBEAT_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(t);
+      if (heartbeatRef.current === beat) heartbeatRef.current = null;
     };
   }, [state, networkMode, suspendInto, noteControlFailure, noteControlSuccess]);
+
+  /**
+   * Renouvellement immédiat du battement (premier plan, début de navigation).
+   * Complementaire du battement périodique — jamais un remplacement : l'échelon
+   * fixe 10 s continue de maintenir la session en continu.
+   */
+  const renewNow = useCallback(async () => {
+    const s = stateRef.current;
+    if (s !== "wifi_active" && s !== "paused") return;
+    const beat = heartbeatRef.current;
+    if (!beat) return;
+    try {
+      await beat();
+    } catch (e) {
+      logger.warn(TAG, "renewNow impossible", e);
+    }
+  }, []);
 
   // ————————————————————————————————————————————————————————
   // Lecture périodique du quota serveur (source de vérité)
@@ -633,7 +695,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       appStateRef.current = next;
       const isVpnDemo = networkModeRef.current === "android_vpn_demo";
 
-      if (prev === "active" && next !== "active") {
+      if (prev === "active" && next === "background") {
         const s = stateRef.current;
         if (s === "ad_active" || s === "ad_loading") {
           // Publicité en cours : invalidation (epoch + gate + blocage natif).
@@ -651,12 +713,57 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
           // Reprise au premier plan : revalidation serveur obligatoire
           // (session + même quota), jamais d'autorisation locale aveugle.
           await resumeFromPausedRef.current();
+        } else if (stateRef.current === "wifi_active") {
+          // Session toujours active après un passage en arrière-plan fugitif :
+          // renouvellement immédiat (aucune échéance native ne doit expirer
+          // sans nouveau battement ; l'échelon périodique continue par ailleurs).
+          await renewNow();
         }
       }
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ————————————————————————————————————————————————————————
+  // Sortie explicite de l'état authorizing_wifi (cul-de-sac borné).
+  // Cet état est posé par la réconciliation quota quand le serveur annonce une
+  // session active SANS autorisation native en place. Sans aboutissement
+  // (aucun flux en cours pour l'accorder), il pouvait rester figé et
+  // verrouiller connect() et l'écran « Autorisation Wi-Fi » : on le quitte
+  // explicitement au bout d'un délai borné (chute vers idle, message clair,
+  // nouvelle tentative possible). On ne supprime JAMAIS le contrôle : la
+  // sortie coupe aussi toute autorisation native résiduelle.
+  // ————————————————————————————————————————————————————————
+  useEffect(() => {
+    if (state !== "authorizing_wifi") {
+      if (authorizeWatchdogRef.current) {
+        clearTimeout(authorizeWatchdogRef.current);
+        authorizeWatchdogRef.current = null;
+      }
+      return;
+    }
+    vpnBlocker.trace(`authorizing_wifi watchdog armé (${AUTHORIZE_TIMEOUT_MS} ms)`);
+    authorizeWatchdogRef.current = setTimeout(() => {
+      authorizeWatchdogRef.current = null;
+      if (stateRef.current !== "authorizing_wifi") return;
+      vpnBlocker.trace("authorizing_wifi stuck -> sortie explicite vers idle");
+      epochGuard.advance();
+      flowGate.forceClose();
+      vpnBlocker.blockNow().catch(() => {});
+      setDisconnectReason(undefined);
+      setInternetStatus("cut");
+      setState("idle");
+      setLastError("Autorisation non confirmée dans le délai. Réessayez depuis l'Accueil.");
+    }, AUTHORIZE_TIMEOUT_MS);
+    return () => {
+      if (authorizeWatchdogRef.current) {
+        clearTimeout(authorizeWatchdogRef.current);
+        authorizeWatchdogRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   async function invalidateAd() {
     if (viewingRef.current) {
@@ -1035,6 +1142,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       }
 
       viewingRef.current = { viewId: started.viewId, campaignId: campaignToUse.id };
+      // Nouveau VISIONNAGE : la clé du lecteur (campagne:nonce) change, ce qui
+      // force un remontage à neuf — le lecteur expo-av rejouera depuis le
+      // début et didJustFinish redeviendra fiable même pour la même campagne.
+      setAdViewNonce((n) => n + 1);
       vpnBlocker.trace(`start-ad-view id=${started.viewId} campaign=${campaignToUse.id} dur=${campaignToUse.durationSeconds}`);
       startLoadingTimer();
       transition(ACTIONS.AD_AVAILABLE);
@@ -1322,6 +1433,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       networkMode,
       vpnStatus,
       isResuming,
+      adViewNonce,
+      renewNow,
       setNetworkMode,
       requestVpnConsent,
       consumeSimulatedBytes,
@@ -1354,6 +1467,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       networkMode,
       vpnStatus,
       isResuming,
+      adViewNonce,
+      renewNow,
       setNetworkMode,
       requestVpnConsent,
       consumeSimulatedBytes,
