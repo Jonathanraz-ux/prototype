@@ -7,6 +7,7 @@
 
 import { callFunction, AgentHttpError } from "./http.mjs";
 import { verifyCommand } from "./lib/signatures.mjs";
+import { isIpv4, resolveClientAddress } from "./lib/router-targets.mjs";
 
 const WZ_COMMENT = (sessionId) => `wz:${String(sessionId).slice(0, 8)}`;
 
@@ -183,10 +184,39 @@ export class AgentEngine {
   }
 
   async handleAuthorize(sessionId, payload) {
-    const address = payload.device_observed_ip;
+    const declared = payload.device_observed_ip;
+    let address = isIpv4(declared) ? String(declared).trim() : null;
+    let resolvedHow = "declared";
+
     if (!address) {
-      return { ok: false, error_message: "Aucune adresse IP observable pour autoriser" };
+      // L'app ne connaît pas son IP de gestion et ne doit pas la connaître.
+      // On l'observe donc sur le routeur : plus fiable que ce que le
+      // téléphone déclare, et l'adresse reste hors de la base.
+      let leases = [];
+      try {
+        leases = (await this.router.dhcpLeases()) ?? [];
+      } catch (err) {
+        return {
+          ok: false,
+          error_message: `Lecture des baux DHCP impossible : ${err?.message ?? err}`,
+        };
+      }
+      const resolved = resolveClientAddress({
+        leases,
+        wantedIp: declared,
+        wantedMac: payload.device_observed_mac,
+      });
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          error_message: `${resolved.reason} Adresse à autoriser indéterminée.`,
+        };
+      }
+      address = resolved.address;
+      resolvedHow = resolved.how;
+      this.log.info(`[agent] adresse résolue depuis le routeur (${resolvedHow}) : ${address}`);
     }
+
     const comment = WZ_COMMENT(sessionId);
 
     // 1. Entrée dans la liste pilotée.
@@ -230,7 +260,7 @@ export class AgentEngine {
     );
     return {
       ok: true,
-      result: { address, comment, reference, queue: queue.name ?? null },
+      result: { address, comment, reference, queue: queue.name ?? null, addressSource: resolvedHow },
       session_id: sessionId,
       router_session_reference: reference,
     };

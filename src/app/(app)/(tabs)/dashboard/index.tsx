@@ -30,6 +30,7 @@ export default function DashboardScreen() {
     networkHealth,
     networkProviderKind,
     networkAgentSimulated,
+    networkDetailVerified,
     lastSyncAt,
     isResuming,
   } = useConnection();
@@ -213,8 +214,13 @@ export default function DashboardScreen() {
             networkHealth={networkHealth}
             providerKind={networkProviderKind}
             agentSimulated={networkAgentSimulated}
+            detailVerified={networkDetailVerified}
             lastSyncAt={lastSyncAt}
-            meterTrusted={networkProviderKind === "live" && !networkAgentSimulated}
+            meterTrusted={
+              networkDetailVerified &&
+              networkProviderKind === "live" &&
+              !networkAgentSimulated
+            }
           />
 
           <View style={{ height: 260 }}>

@@ -31,7 +31,7 @@ const config: ExpoConfig = {
     // ce nom FERME la mise à jour en place (signature identique obligatoire
     // sur un package inchangé) → préserver à moins de conflit démontré.
     package: "com.wifizone.app",
-    versionCode: 7,
+    versionCode: 8,
     permissions: ["INTERNET", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE"],
     jsEngine: "hermes"
   },

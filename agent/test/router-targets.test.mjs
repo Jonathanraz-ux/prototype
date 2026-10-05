@@ -19,6 +19,7 @@ import {
   queueTargetStrings,
   rowTargetsAddress,
   countersFromQueueRow,
+  resolveClientAddress,
 } from "../lib/router-targets.mjs";
 
 test("isIpv4 valide le format strict", () => {
@@ -152,4 +153,84 @@ test("rowTargetsAddress : cible imbriquée reconnue, voisine non confondu", () =
   const deep = {};
   deep.target = deep;
   assert.equal(rowTargetsAddress(deep, "10.0.0.5"), false);
+});
+
+// --- Résolution d'adresse observée sur le routeur -------------------------
+// Ces cas couvrent le blocage qui rendait le test MikroTik impossible :
+// l'app n'envoie pas d'adresse, l'agent doit la lire sur les baux DHCP.
+
+test("resolveClientAddress : l'IP déclarée a la priorité (chemin historique)", () => {
+  const r = resolveClientAddress({
+    wantedIp: "10.0.0.9",
+    leases: [{ address: "10.0.0.42", activeAddress: "10.0.0.42" }],
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.address, "10.0.0.9");
+  assert.equal(r.how, "declared");
+});
+
+test("resolveClientAddress : un MAC sans bail correspondant REFUSE", () => {
+  const r = resolveClientAddress({
+    wantedMac: "AA:BB:CC:DD:EE:FF",
+    leases: [{ address: "10.0.0.42", activeAddress: "10.0.0.42" }],
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.address, null);
+  assert.equal(r.how, "mac");
+  // Le refus doit dire POURQUOI et COMBIEN de candidats vus, sinon le
+  // déploiement tourne en rond sans piste.
+  assert.match(r.reason, /MAC/);
+  assert.equal(r.candidates, 1);
+});
+
+test("resolveClientAddress : sépare un client actif d'une plage statique", () => {
+  const r = resolveClientAddress({
+    leases: [
+      { address: "10.0.0.42", activeAddress: "10.0.0.42" },
+      { address: "10.0.0.100-10.0.0.200", dynamic: "false" }, // plage statique
+      { address: "10.0.0.77", activeAddress: "10.0.0.77", blocked: "true" }, // bloqué
+    ],
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.address, "10.0.0.42");
+  assert.equal(r.how, "sole_client");
+});
+
+test("resolveClientAddress : à plusieurs clients, REFUSE de deviner", () => {
+  // C'est le point de sécurité central : sans MAC, choisir une adresse
+  // parmi deux reviendrait à autoriser le Wi-Fi du mauvais client, et
+  // l'erreur est invisible depuis l'interface.
+  const r = resolveClientAddress({
+    leases: [
+      { address: "10.0.0.42", activeAddress: "10.0.0.42" },
+      { address: "10.0.0.43", activeAddress: "10.0.0.43" },
+    ],
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.address, null);
+  assert.equal(r.how, "ambiguous");
+  assert.equal(r.candidates, 2);
+  assert.match(r.reason, /2 clients actifs/);
+});
+
+test("resolveClientAddress : aucun bail actif REFUSE (banc non associé)", () => {
+  const r = resolveClientAddress({ leases: [] });
+  assert.equal(r.ok, false);
+  assert.equal(r.how, "none");
+  assert.match(r.reason, /associé/);
+});
+
+test("resolveClientAddress : la MAC Prime sur le compte de clients", () => {
+  // 3 clients actifs, mais une MAC identifie le bon : on n'ambiguïse pas.
+  const r = resolveClientAddress({
+    wantedMac: "AA-BB-CC-DD-EE-03", // séparateurs différents : normalisés
+    leases: [
+      { address: "10.0.0.41", activeAddress: "10.0.0.41", macAddress: "AA:BB:CC:DD:EE:01" },
+      { address: "10.0.0.42", activeAddress: "10.0.0.42", macAddress: "AA:BB:CC:DD:EE:02" },
+      { address: "10.0.0.43", activeAddress: "10.0.0.43", macAddress: "aabbccddee03" },
+    ],
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.address, "10.0.0.43");
+  assert.equal(r.how, "mac");
 });

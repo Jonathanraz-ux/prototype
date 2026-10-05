@@ -26,8 +26,16 @@ const PLAN_LABEL = "Standard";
 export default function AccountSection() {
   const router = useRouter();
   const { user, logout } = useAuth();
-  const { usage, networkProviderKind } = useConnection();
+  const { usage, networkProviderKind, networkAgentSimulated, networkDetailVerified } =
+    useConnection();
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // Mêmes règles que ConnectionStatusCard : « live » ne vient que de la
+  // configuration locale, et l'agent peut être un simulateur. Sans ces deux
+  // conditions, cet écran affichait « 0 min sur 0 min » juste à côté du
+  // libellé « Routeur simulé » de la carte d'état.
+  const countersTrusted =
+    networkDetailVerified && networkProviderKind === "live" && !networkAgentSimulated;
 
   if (!user) return null;
 
@@ -68,7 +76,7 @@ export default function AccountSection() {
           <Sparkles color={COLORS.accent} size={14} />
           <Text style={styles.cardHeaderText}>Internet financé par la publicité</Text>
         </View>
-        {networkProviderKind === "live" ? (
+        {countersTrusted ? (
           <View style={styles.metrics}>
             <View style={styles.metric}>
               <View style={styles.metricIcon}>

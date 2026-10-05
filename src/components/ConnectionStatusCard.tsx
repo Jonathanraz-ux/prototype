@@ -38,6 +38,13 @@ interface ConnectionStatusCardProps {
    * le défaut est la prudence (fail closed).
    */
   agentSimulated?: boolean;
+  /**
+   * true quand le serveur a au moins répondu sur l'état de la chaîne réseau.
+   * `providerKind` seul ne prouve rien : il décrit la configuration locale,
+   * pas ce que le routeur fait réellement. Défaut `false` = prudent, donc un
+   * appelant qui oublie ce drapeau n'obtient jamais un faux « accès réel ».
+   */
+  detailVerified?: boolean;
   lastSyncAt?: string | null;
   /**
    * true uniquement si le compteur provient réellement du routeur (MikroTik,
@@ -66,6 +73,7 @@ export default function ConnectionStatusCard({
   networkHealth,
   providerKind,
   agentSimulated = false,
+  detailVerified = false,
   lastSyncAt,
   meterTrusted
 }: ConnectionStatusCardProps) {
@@ -75,13 +83,23 @@ export default function ConnectionStatusCard({
   // Un compteur n'est « de confiance » que si le routeur est réel ET piloté
   // par un agent de production. `meterTrusted` reste prioritaire quand le
   // parent le fournit ; sinon on le déduit honnêtement des deux drapeaux.
-  const countersTrusted = meterTrusted ?? (providerKind === "live" && !agentSimulated);
+  //
+  // `detailVerified` est indispensable : `providerKind` vient de la
+  // configuration LOCALE (EXPO_PUBLIC_NETWORK_MODE), donc il vaut déjà
+  // « live » au premier rendu, avant tout appel réseau. Sans lui, un
+  // simulateur s'affichait « Accès réseau réel (MikroTik) » avec 0 %.
+  const countersTrusted =
+    meterTrusted ?? (detailVerified && providerKind === "live" && !agentSimulated);
   const mockLive = providerKind === "live" && agentSimulated;
-  const providerLabel = mockLive
-    ? "Routeur simulé (agent de test)"
-    : providerKind
-      ? PROVIDER_LABEL[providerKind]
-      : null;
+  // Tant que le serveur n'a pas répondu, on ne revendique aucun mode
+  // d'accès : afficher « réel » ou « simulé » serait deviner.
+  const providerLabel = !detailVerified
+    ? "Mode réseau à confirmer"
+    : mockLive
+      ? "Routeur simulé (agent de test)"
+      : providerKind
+        ? PROVIDER_LABEL[providerKind]
+        : null;
 
   const healthLabel = networkHealth
     ? {

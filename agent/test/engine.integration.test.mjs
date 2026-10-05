@@ -176,6 +176,84 @@ test("collect_usage → tirage des compteurs cumulés puis agent-collect", async
   assert.ok(c.bytes_in + c.bytes_out > 4000, "compteurs cumulés >= 3 s de débit");
 });
 
+// ---- Autorisation sans adresse transmise (le cas réel de l'app) ----
+// L'app n'envoie pas d'IP : elle ne peut pas la connaître. Avant ce correctif,
+// l'agent refusait systématiquement et le test MikroTik ne pouvait pas
+// aboutir. Ces tests verrouillent le chemin réellement emprunté.
+
+test("authorize SANS IP : l'adresse est résolue sur les baux du routeur", async () => {
+  const router = new MockRouter({
+    leases: [{ address: "10.0.0.77", activeAddress: "10.0.0.77", dynamic: "true" }],
+  });
+  const engine = new AgentEngine({ env: makeEnv(), router, log: QUIET });
+  const server = fakeServer();
+  engine.call = server.call;
+
+  const sessionId = "22222222-3333-4444-5555-666666666666";
+  const cmd = signedCommand({
+    id: "eeeeeeee-dddd-eeee-ffff-000000000010",
+    type: "authorize",
+    site_id: "9e1c2c1e-0e0a-4f2b-8c3e-1234567890ab",
+    payload: JSON.stringify({ session_id: sessionId }),
+  });
+
+  await engine.processCommand(cmd);
+
+  assert.equal(server.reports[0].ok, true, "l'autorisation ne doit plus échouer faute d'IP");
+  assert.ok(router.queues.has("10.0.0.77"), "la file doit porter l'adresse lue sur le routeur");
+  // La file ET l'entrée doivent viser la MÊME adresse : c'est ce qui rend
+  // le comptage réel, pas juste l'accès ouvert.
+  assert.ok([...router.entries.keys()].includes("10.0.0.77"));
+});
+
+test("authorize SANS IP et sans bail : refus motivé, AUCUN accès ouvert", async () => {
+  const router = new MockRouter({ leases: [] });
+  const engine = new AgentEngine({ env: makeEnv(), router, log: QUIET });
+  const server = fakeServer();
+  engine.call = server.call;
+
+  const cmd = signedCommand({
+    id: "ffffffff-dddd-eeee-ffff-000000000011",
+    type: "authorize",
+    site_id: "9e1c2c1e-0e0a-4f2b-8c3e-1234567890ab",
+    payload: JSON.stringify({ session_id: "33333333-4444-5555-6666-777777777777" }),
+  });
+
+  await engine.processCommand(cmd);
+
+  assert.equal(server.reports[0].ok, false);
+  // Le message doit être actionnable : un refus muet fait échouer le test
+  // physique sans explication.
+  assert.match(server.reports[0].error_message ?? "", /bail/i);
+  assert.equal(router.entries.size, 0, "aucun client ne doit être autorisé");
+  assert.equal(router.queues.size, 0, "aucune file ne doit être créée");
+});
+
+test("authorize SANS IP à deux clients : refus, ne pas ouvrir le mauvais", async () => {
+  const router = new MockRouter({
+    leases: [
+      { address: "10.0.0.41", activeAddress: "10.0.0.41" },
+      { address: "10.0.0.42", activeAddress: "10.0.0.42" },
+    ],
+  });
+  const engine = new AgentEngine({ env: makeEnv(), router, log: QUIET });
+  const server = fakeServer();
+  engine.call = server.call;
+
+  const cmd = signedCommand({
+    id: "aaaaaaaa-dddd-eeee-ffff-000000000012",
+    type: "authorize",
+    site_id: "9e1c2c1e-0e0a-4f2b-8c3e-1234567890ab",
+    payload: JSON.stringify({ session_id: "44444444-5555-6666-7777-888888888888" }),
+  });
+
+  await engine.processCommand(cmd);
+
+  assert.equal(server.reports[0].ok, false, "un choix à l'aveugle est interdit");
+  assert.equal(router.entries.size, 0);
+  assert.equal(router.queues.size, 0);
+});
+
 // ---- Contrat de comptage (l'argent des abonnés) -----------------
 
 test("authorize crée la file de comptage — sans elle l'accès n'est pas mesuré", async () => {

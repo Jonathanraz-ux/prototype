@@ -105,6 +105,10 @@ export interface ConnectionContextValue {
    * jamais présenter une simulation comme un accès réseau réel.
    */
   networkAgentSimulated: boolean;
+  /** Le serveur a-t-il répondu au moins une fois sur l'état de la chaîne
+   * réseau ? Tant que c'est faux, aucun compteur n'est jugé fiable et aucun
+   * libellé « accès réel » ne doit être affiché. */
+  networkDetailVerified: boolean;
   currentAd: AdCampaign | null;
   lastSyncAt: string | null;
   networkMode: NetworkMode;
@@ -192,6 +196,12 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [lastError, setLastError] = useState<string | null>(null);
   const [networkHealth, setNetworkHealth] = useState("NOT_CONFIGURED");
   const [networkAgentSimulated, setNetworkAgentSimulated] = useState(false);
+  // Tant que le serveur n'a pas répondu, `providerKind` ne dit que ce que la
+  // configuration LOCALE affirme (EXPO_PUBLIC_NETWORK_MODE=mikrotik ⇒ « live »).
+  // Sans ce drapeau, un démarrage à froid afficherait « Accès réseau réel
+  // (MikroTik) » et des compteurs à zéro avant tout appel : un routeur simulé
+  // afficherait « réel ». On ne croit `simulated` qu'une fois la réponse lue.
+  const [networkDetailVerified, setNetworkDetailVerified] = useState(false);
   const [currentAd, setCurrentAd] = useState<AdCampaign | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [vpnStatus, setVpnStatus] = useState<VpnBlockerStatus | null>(null);
@@ -1118,6 +1128,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       const detail = await readNetworkDetail(networkAdapter);
       setNetworkHealth(detail.health);
       setNetworkAgentSimulated(detail.agentSimulated);
+      setNetworkDetailVerified(true);
       if (!epochGuard.isCurrent(gen)) return; // arrière-plan pendant la préparation
 
       let campaignToUse = currentAd;
@@ -1438,6 +1449,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       lastError,
       networkHealth,
       networkAgentSimulated,
+      networkDetailVerified,
       networkProviderKind: networkAdapter.providerKind,
       currentAd,
       lastSyncAt,
@@ -1473,6 +1485,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       lastError,
       networkHealth,
       networkAgentSimulated,
+      networkDetailVerified,
       networkAdapter,
       currentAd,
       lastSyncAt,

@@ -632,6 +632,37 @@ export class RouterOSApi {
     return null;
   }
 
+  /**
+   * Baux DHCP vus par le routeur. C'est la SEULE source fiable de
+   * l'adresse du client : l'application ne la connaît pas et ne doit pas
+   * la connaître (invariant « aucun identifiant routeur dans l'app »).
+   *
+   * `active-address` est l'adresse réellement attribuée ; `address` peut être
+   * une plage pour une entrée dynamique sans client. On lit les deux, la
+   * résolution tranche en amont.
+   */
+  async dhcpLeases() {
+    const reply = await this.request([
+      "/ip/dhcp-server/lease/print",
+      "=.proplist=address,mac-address,host-name,status,active-address,blocked,dynamic",
+    ]);
+    if (this.hasError(reply)) {
+      // RouterOS sans serveur DHCP configuré : ce n'est pas une erreur
+      // fatale, l'appelant doit juste apprendre qu'il n'y a rien à lire.
+      return [];
+    }
+    const rows = reply.filter((r) => r && !Array.isArray(r) && r[".id"] !== undefined);
+    return rows.map((r) => ({
+      address: r.address ?? null,
+      activeAddress: r["active-address"] ?? null,
+      macAddress: r["mac-address"] ?? null,
+      hostName: r["host-name"] ?? null,
+      status: r.status ?? null,
+      blocked: r.blocked ?? null,
+      dynamic: r.dynamic ?? null,
+    }));
+  }
+
   async clients() {
     const reply = await this.request([
       "/ip/firewall/address-list/print",

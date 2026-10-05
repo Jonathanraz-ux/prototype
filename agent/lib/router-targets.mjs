@@ -207,3 +207,97 @@ export function countersFromQueueRow(row) {
   }
   return { bytesIn: 0, bytesOut: 0, available: false };
 }
+
+/**
+ * Résout l'adresse du client à autoriser, à partir des baux DHCP du routeur.
+ *
+ * POURQUOI cette fonction existe : l'application ne connaît pas son adresse
+ * IP de gestion — elle n'en a aucun besoin et n'a aucun moyen de l'obtenir
+ * (invariant « aucun identifiant routeur dans l'app »). Elle envoyait donc
+ * `device_observed_ip: undefined`, la valeur traversait la commande signée
+ * jusqu'à `handleAuthorize`, et l'agent refusait d'autoriser : le test MikroTik
+ * ne pouvait pas aboutir, quel que soit le nombre de tentatives.
+ *
+ * Plutôt que de faire confiance au client, l'agent OBSERVE l'adresse sur le
+ * routeur. C'est plus fiable que ce que le téléphone déclare, et cela garde
+ * l'adresse hors de la base et du bundle.
+ *
+ * Ordre de résolution, fail closed à chaque étape :
+ *   1. `wantedIp` si l'appelant en fournit une (chemin historique) ;
+ *   2. sinon le bail dont la MAC correspond à `wantedMac` ;
+ *   3. sinon, et UNIQUEMENT s'il n'y a qu'un seul client actif, cette adresse.
+ *
+ * À deux clients actifs ou plus, on REFUSE. Deviner WHICH adresse
+ * autoriser reviendrait à ouvrir le Wi-Fi d'un client au motif de celui
+ * d'un autre — c'est le seul choix qui ne peut pas être annulé depuis
+ * l'interface.
+ *
+ * @param {{ leases?: Array<object>, wantedIp?: string|null, wantedMac?: string|null }} input
+ * @returns {{ ok: boolean, address: string|null, how: string, reason?: string, candidates?: number }}
+ */
+export function resolveClientAddress(input = {}) {
+  const { leases = [], wantedIp, wantedMac } = input;
+
+  if (isIpv4(wantedIp)) {
+    return { ok: true, address: String(wantedIp).trim(), how: "declared" };
+  }
+
+  const normMac = (v) => String(v ?? "").trim().toLowerCase().replace(/[:-]/g, "");
+  const wanted = normMac(wantedMac);
+
+  // Bail actif : addressable, non bloqué, et non réservé aux cas particuliers
+  // (dynamic=false ⇒ entrée statique, sans client derrière).
+  const active = leases.filter((l) => {
+    const address = l.activeAddress ?? l.address;
+    if (!isIpv4(address)) return false;
+    if (String(l.blocked ?? "").toLowerCase() === "true") return false;
+    if (String(l.dynamic ?? "true").toLowerCase() === "false") return false;
+    return true;
+  });
+
+  if (wanted) {
+    const hit = active.find((l) => normMac(l.macAddress) === wanted);
+    if (hit) {
+      const address = hit.activeAddress ?? hit.address;
+      return { ok: true, address: String(address).trim(), how: "mac" };
+    }
+    return {
+      ok: false,
+      address: null,
+      how: "mac",
+      reason:
+        `Aucun bail DHCP ne correspond à la MAC ${wantedMac} ` +
+        `(${active.length} bail(s) actif(s) vus sur le routeur).`,
+      candidates: active.length,
+    };
+  }
+
+  if (active.length === 1) {
+    return {
+      ok: true,
+      address: String(active[0].activeAddress ?? active[0].address).trim(),
+      how: "sole_client",
+    };
+  }
+  if (active.length === 0) {
+    return {
+      ok: false,
+      address: null,
+      how: "none",
+      reason:
+        "Aucun bail DHCP actif sur le routeur : le téléphone est-il associé au " +
+        "SSID de test ? L'adresse ne peut pas être devinée.",
+      candidates: 0,
+    };
+  }
+  return {
+    ok: false,
+    address: null,
+    how: "ambiguous",
+    reason:
+      `${active.length} clients actifs sur le routeur et aucune MAC transmise : ` +
+      "l'agent refuse de choisir à l'aveugle (autoriser le mauvais client " +
+      "impossible à corriger depuis l'interface).",
+    candidates: active.length,
+  };
+}

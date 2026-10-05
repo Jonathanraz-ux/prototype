@@ -8,13 +8,14 @@
 import { clientTarget, queueNameFor } from "./router-targets.mjs";
 
 export class MockRouter {
-  constructor({ listName = "wz-active", bytesPerSec = 120000 } = {}) {
+  constructor({ listName = "wz-active", bytesPerSec = 120000, leases } = {}) {
     this.name = "mock";
     this.listName = listName;
     this.bytesPerSec = bytesPerSec;
     this.entries = new Map(); // address -> { comment, bytesIn, bytesOut }
     this.queues = new Map(); // address -> nom de file
     this.lastTick = Date.now();
+    this.leases = leases;
   }
 
   async connect() {
@@ -63,6 +64,21 @@ export class MockRouter {
   async deauthorize({ address } = {}) {
     if (address && this.entries.delete(address)) return true;
     return false;
+  }
+
+  /**
+   * Baux DHCP simulés. Le mock expose une méthode de plus que le vrai
+   * routeur n'a de raison d'en avoir : c'est ce qui permet de tester le
+   * moteur SANS adresse déclarée, exactement comme le fait l'app.
+   *
+   * Par défaut un seul client actif : la résolution « sole_client » est
+   * alors la seule possible, comme sur un banc de test à un téléphone.
+   * Les tests peuvent en injecter d'autres via le constructeur.
+   */
+  async dhcpLeases() {
+    return (this.leases ?? [{ address: "10.0.0.42", activeAddress: "10.0.0.42", dynamic: "true" }]).map(
+      (l) => ({ status: "bound", blocked: "false", ...l })
+    );
   }
 
   async clients() {
