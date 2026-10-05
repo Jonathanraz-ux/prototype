@@ -43,7 +43,7 @@ function getArg(args, key) {
 
 function parseArgs(argv) {
   return {
-    mock: argv.includes("--mock"),
+    mockRequested: argv.includes("--mock"),
     verify: argv.includes("--verify") || argv.includes("--check"),
     undo: argv.includes("--undo"),
     arm: argv.includes("--arm"),
@@ -596,10 +596,6 @@ async function undoAll(router, args) {
 }
 
 async function connectRouter(args, env) {
-  if (args.mock) {
-    const { MockRouter } = await import("./lib/mock-router.mjs");
-    return new MockRouter({ listName: WZ_LIST, bytesPerSec: 120000 });
-  }
   const router = new RouterOSApi({
     host: env.MIKROTIK_HOST,
     username: env.MIKROTIK_USERNAME,
@@ -616,23 +612,37 @@ async function connectRouter(args, env) {
 
 async function run() {
   const args = parseArgs(process.argv.slice(2));
-  const env = loadAgentEnv(args.mock ? { NETWORK_ADAPTER_TYPE: "mock" } : {});
 
-  if (!args.mock) {
-    if (!env.MIKROTIK_HOST) {
-      log.error("MIKROTIK_HOST absent : renseigner agent/.env (voir .env.example.agent)");
-      process.exit(1);
-    }
-    if (!env.MIKROTIK_PASSWORD || env.MIKROTIK_PASSWORD === "changez-moi") {
-      log.error("MIKROTIK_PASSWORD absent ou « changez-moi » dans agent/.env");
-      process.exit(1);
-    }
-    if (env.AGENT_ROUTER_PROTOCOL !== "api") {
-      log.warn(
-        `AGENT_ROUTER_PROTOCOL=${env.AGENT_ROUTER_PROTOCOL} : le provisionnement passe par ` +
-          "l'API binaire (8728), seul protocole disponible sur un hAP d'usine 6.42."
-      );
-    }
+  // Le provisionnement ne se simule pas. Il écrit cinq règles firewall, crée un
+  // compte et déclenche une sauvegarde : sur un routeur simulé les dix étapes
+  // seraient validées sans qu'un seul octet ne soit posé sur un équipement —
+  // exactement le faux vert que ce projet refuse ailleurs (« aucun compteur
+  // n'est remonté en 0 », « implemented: false » plutôt qu'un succès inventé).
+  // Le simulateur de protocole est déjà exercé par test/provision.integration.
+  if (args.mockRequested) {
+    log.error(
+      "--mock n'est pas supporté par le provisionnement : il n'y a rien à vérifier sur un " +
+        "routeur simulé.\n  Provisionnez le routeur réel — il est protégé : la règle de blocage " +
+        "est posée DÉSACTIVÉE, et -Verify contrôle en lecture seule."
+    );
+    process.exit(1);
+  }
+
+  const env = loadAgentEnv();
+
+  if (!env.MIKROTIK_HOST) {
+    log.error("MIKROTIK_HOST absent : renseigner agent/.env (voir .env.example.agent)");
+    process.exit(1);
+  }
+  if (!env.MIKROTIK_PASSWORD || env.MIKROTIK_PASSWORD === "changez-moi") {
+    log.error("MIKROTIK_PASSWORD absent ou « changez-moi » dans agent/.env");
+    process.exit(1);
+  }
+  if (env.AGENT_ROUTER_PROTOCOL !== "api") {
+    log.warn(
+      `AGENT_ROUTER_PROTOCOL=${env.AGENT_ROUTER_PROTOCOL} : le provisionnement passe par ` +
+        "l'API binaire (8728), seul protocole disponible sur un hAP d'usine 6.42."
+    );
   }
 
   let router;

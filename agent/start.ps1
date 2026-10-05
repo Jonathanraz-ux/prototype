@@ -86,11 +86,14 @@ if ($Provision -or $Verify -or $Arm -or $Undo) {
   if ($Verify)  { $provArgs += "--verify" }
   if ($Arm)     { $provArgs += "--arm" }
   if ($Undo)    { $provArgs += "--undo" }
-  if ($Mock)    { $provArgs += "--mock" }
   if ($IpAgent -ne "") { $provArgs += @("--ip-agent", $IpAgent) }
 
   $title = if ($Undo) { "RETOUR ARRIERE" } elseif ($Verify) { "VERIFICATION (n'ecrit rien)" } elseif ($Arm) { "ARMEMENT" } else { "PROVISIONNEMENT" }
   Write-Host "== $title du routeur MikroTik ==" -ForegroundColor Cyan
+  if ($Mock) {
+    Write-Host "  -Mock ignore ici : le provisionnement ne se simule pas (une simulation" -ForegroundColor DarkYellow
+    Write-Host "  validerait les dix etapes sans rien ecrire sur un equipment)." -ForegroundColor DarkYellow
+  }
   if (-not $Arm -and -not $Undo) {
     Write-Host "  La regle de blocage est posee DESACTIVEE : Internet continue de fonctionner." -ForegroundColor DarkGray
     Write-Host "  Armer ensuite avec : .\agent\start.ps1 -Arm" -ForegroundColor DarkGray
