@@ -11,7 +11,12 @@
     "start": "node main.mjs",
     "mock": "node main.mjs --mock",
     "register": "node register.mjs",
-    "test": "node --test test/",
-    "check": "node --check config.mjs && node --check main.mjs && node --check engine.mjs && node --check lib/signatures.mjs"
+    "test": "node --test test/*.test.mjs",
+    "doctor": "node main.mjs --doctor",
+    "provision": "node provision.mjs",
+    "provision:arm": "node provision.mjs --arm",
+    "verify": "node provision.mjs --verify",
+    "undo": "node provision.mjs --undo",
+    "check": "node --check config.mjs && node --check main.mjs && node --check engine.mjs && node --check doctor.mjs && node --check http.mjs && node --check register.mjs && node --check provision.mjs && node --check lib/signatures.mjs && node --check lib/mock-router.mjs && node --check lib/routeros-rest.mjs && node --check lib/routeros-api.mjs && node --check lib/router-targets.mjs"
   }
 }

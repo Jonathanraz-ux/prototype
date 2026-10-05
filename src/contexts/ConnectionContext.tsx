@@ -36,7 +36,7 @@ import {
 } from "../repositories/adRepository";
 import type { AdCampaign } from "../types";
 import { registerDevice } from "../repositories/deviceRepository";
-import { resolveNetworkAdapter, type NetworkMode, type NetworkProviderKind } from "../network";
+import { resolveNetworkAdapter, readNetworkDetail, type NetworkMode, type NetworkProviderKind } from "../network";
 import { waitForMikrotikAuthorization } from "../lib/mikrotikAuth";
 import { getConfig } from "../lib/config";
 import {
@@ -97,6 +97,14 @@ export interface ConnectionContextValue {
   lastError: string | null;
   networkHealth: string;
   networkProviderKind: NetworkProviderKind;
+  /**
+   * true quand le fournisseur « live » n'est PAS confirmé comme matériel
+   * réel : agent de test (`MIKROTIK_MOCK`) ou information absente, faute de
+   * `MIKROTIK_REAL=1` côté serveur. L'interface l'annonce alors comme une
+   * simulation et n'affiche aucun compteur : règle absolue du projet, ne
+   * jamais présenter une simulation comme un accès réseau réel.
+   */
+  networkAgentSimulated: boolean;
   currentAd: AdCampaign | null;
   lastSyncAt: string | null;
   networkMode: NetworkMode;
@@ -183,6 +191,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [adError, setAdError] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [networkHealth, setNetworkHealth] = useState("NOT_CONFIGURED");
+  const [networkAgentSimulated, setNetworkAgentSimulated] = useState(false);
   const [currentAd, setCurrentAd] = useState<AdCampaign | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [vpnStatus, setVpnStatus] = useState<VpnBlockerStatus | null>(null);
@@ -1106,8 +1115,9 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       setInternetStatus("cut");
       setDisconnectReason(undefined);
 
-      const health = await networkAdapter.healthCheck();
-      setNetworkHealth(health);
+      const detail = await readNetworkDetail(networkAdapter);
+      setNetworkHealth(detail.health);
+      setNetworkAgentSimulated(detail.agentSimulated);
       if (!epochGuard.isCurrent(gen)) return; // arrière-plan pendant la préparation
 
       let campaignToUse = currentAd;
@@ -1427,6 +1437,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       adError,
       lastError,
       networkHealth,
+      networkAgentSimulated,
       networkProviderKind: networkAdapter.providerKind,
       currentAd,
       lastSyncAt,
@@ -1461,6 +1472,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       adError,
       lastError,
       networkHealth,
+      networkAgentSimulated,
       networkAdapter,
       currentAd,
       lastSyncAt,

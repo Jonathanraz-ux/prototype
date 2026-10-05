@@ -18,7 +18,9 @@ et tout est vert (jest 148/148, agent 17/17, tsc OK) :
 - `MikrotikNetworkAdapter` branché sur la vraie chaîne serveur
   (`request-wifi-session` → commande signée HMAC → agent → `active` → compteurs) ;
 - helper pur `src/lib/mikrotikAuth.ts` (`waitForMikrotikAuthorization`) ;
-- badge UI « Accès réseau réel (MikroTik) » vs « Simulation locale » ;
+- badge UI « Accès réseau réel (MikroTik) » vs « Simulation locale », avec une
+  sémantique **fail closed** : `simulated: true` par défaut, `false` seulement
+  sur `MIKROTIK_REAL=1` posé explicitement par l'opérateur (voir §2 item 2) ;
 - `docs/MIKROTIK_MISE_EN_TEST.md` + `scripts/e2e-mikrotik-chain.mjs` (sans routeur).
 
 Le téléphone Android (`LZ0A35TZDD1018669`) et le routeur MikroTik sont
@@ -57,8 +59,13 @@ l'état marqué comme non validé.
 2. **`network-health` (edge function)** — shape de réponse :
    - Vérifier que la réponse contient `configured`, `adapterType`, `health`,
      `agentOnline`, `routerOnline`, `agents`, `routers`, `simulated`.
-   - `simulated` = présence de l'env serveur `MIKROTIK_MOCK=1` (et pas un mode
-     réel) pour que l'app affiche correctement le mode simulé.
+   - `simulated` suit une sémantique **fail closed**, et NON la simple
+     présence de `MIKROTIK_MOCK` : le serveur ne voit pas l'argument `--mock`
+     de l'agent, donc `simulated` ne vaut `false` que si l'opérateur a posé
+     `MIKROTIK_REAL=1` (matériel confirmé). Voir `_shared/network-config.ts`
+     et §2.1.1 de `docs/MIKROTIK_MISE_EN_TEST.md`.
+   - Côté client, un champ `simulated` **absent** est traité comme non
+     confirmé (`agentSimulated: true`) — ne pas revenir à un défaut « réel ».
    - Vérifier le contrat avec `healthCheckDetail()` de
      `src/network/MikrotikNetworkAdapter.ts` (fallbacks déjà en place).
 
@@ -77,12 +84,19 @@ l'état marqué comme non validé.
      MIKROTIK_HOST=<IP_LAN_ROUTEUR> \
      NETWORK_HMAC_SECRET=<secret-minimum-32-caracteres> \
      WIFI_LIST_NAME=wz-active \
-     MIKROTIK_MOCK=1 \
+     MIKROTIK_REAL=1 \
      --project-ref hwwivzsdepzdgonfbkxq
    ```
    Générer le HMAC via
    `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
    NE JAMAIS committer ni afficher ce secret.
+
+   > `MIKROTIK_REAL=1` correspond au **test avec le routeur branché**. Pour une
+   > recette sans matériel, mettre `MIKROTIK_MOCK=1` à la place. Ne jamais poser
+   > `MIKROTIK_REAL=1` sans routeur : l'app afficherait alors un accès « réel »
+   > inexistant. Omitting le drapeau n'est pas dangereux (l'app affiche
+   > « simulé »), ce qui est la propriété recherchée. Voir §2.1.1 de
+   > `docs/MIKROTIK_MISE_EN_TEST.md`.
 
 5. **Enrôlement agent** :
    - `node agent/register.mjs "<AGENT_TOKEN>"` → affiche le sha256hex ;
@@ -116,10 +130,17 @@ l'état marqué comme non validé.
 
 ### D. Déminage
 
-16. Fix serveur de la policy RLS `devices_self_update` (aligner la migration
-    `0003_rls_and_security.sql` avec ce qui est déployé → supprime le 500
-    `register-device`) + masquer le toast LogBox au démarrage.
-17. Diagnostiquer le timeout intermittent appareil `quota-status`
+16. ~~Fix serveur de la policy RLS `devices_self_update`~~ **FAIT** : la
+    migration `0016_devices_rls_upsert_safe.sql` remplace la policy récursive
+    par une version sans sous-requête + déclencheur de garde `status`, et
+    `register-device` écrit via `service_role`. **NON APPLIQUÉE** à la base :
+    à pousser avant le test téléphone.
+17. **Drapeau d'honnêteté désynchronisé** (`--mock` agent vs
+    `MIKROTIK_REAL` serveur) : le mode fail closed évite d'affirmer un routeur
+    inexistant, mais ne prouve rien. Correctif de fond = faire remonter le mode
+    dans le heartbeat (`local_agents` + `record_agent_heartbeat`), migration
+    0017. Non fait.
+18. Diagnostiquer le timeout intermittent appareil `quota-status`
     (cause racine pool HTTP/OkHttp, cf. `docs/ETAT_PROJET.md` §4.2).
 
 ---

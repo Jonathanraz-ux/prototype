@@ -1,7 +1,9 @@
 // ============================================================
 // network-radius-disconnect — Déconnecte une session sur un
 // serveur FreeRADIUS. Secrets serveur uniquement.
-// Nécessite un serveur réel ; sinon état explicite.
+//
+// ⚠️ NON IMPLÉMENTÉ : aucuneDisconnect-Request n'est émis. La fonction
+// répond donc UNREACHABLE plutôt que de prétendre une révocation.
 // ============================================================
 
 import { handleCors, ok, fail, methodNotAllowed } from "../_shared/http.ts";

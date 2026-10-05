@@ -1,9 +1,11 @@
 // ============================================================
 // lib/mock-router.mjs — Routeur SIMULÉ (aucun équipement requis).
-// Pour le déroulé de bout en bout avant mercredi : l'address-list
+// Pour le déroulé de bout en bout avant le routeur : l'address-list
 // et les compteurs vivent en mémoire ; chaque client actif génère
 // un débit simulé (AGENT_MOCK_BYTES_PER_SEC).
 // ============================================================
+
+import { clientTarget, queueNameFor } from "./router-targets.mjs";
 
 export class MockRouter {
   constructor({ listName = "wz-active", bytesPerSec = 120000 } = {}) {
@@ -11,6 +13,7 @@ export class MockRouter {
     this.listName = listName;
     this.bytesPerSec = bytesPerSec;
     this.entries = new Map(); // address -> { comment, bytesIn, bytesOut }
+    this.queues = new Map(); // address -> nom de file
     this.lastTick = Date.now();
   }
 
@@ -29,6 +32,34 @@ export class MockRouter {
     return { reference: `mock:${address}`, address };
   }
 
+  /**
+   * Contrat commun aux vrais routeurs : la file de comptage fait
+   * partie de l'autorisation. Le simulateur n'a rien à créer — ses
+   * compteurs sont générés par le temps simulé — mais la méthode
+   * existe pour que le moteur se comporte à l'identique.
+   */
+  async ensureQueue({ address, comment } = {}) {
+    if (!address) throw new Error("ensureQueue: adresse requise");
+    const name = queueNameFor(address, comment);
+    const known = this.queues.get(address);
+    this.queues.set(address, name);
+    return { created: !known, id: null, name, target: clientTarget(address) };
+  }
+
+  /** Renvoie true si une file a réellement été supprimée (comme le REST). */
+  async removeQueue({ address } = {}) {
+    if (!address) return false;
+    return this.queues.delete(address);
+  }
+
+  async connect() {
+    return true;
+  }
+
+  async disconnect() {}
+
+  async close() {}
+
   async deauthorize({ address } = {}) {
     if (address && this.entries.delete(address)) return true;
     return false;
@@ -43,8 +74,15 @@ export class MockRouter {
     }));
   }
 
+  /**
+   * Compteurs de la file du client. Comme sur un vrai routeur : sans
+   * file, AUCUNE mesure n'est disponible (c'est précisément ce qui
+   * rend la création de file obligatoire pour l'autorisation, et ce
+   * que l'auto-réparation du moteur doit détecter).
+   */
   async queueUsage(address) {
     this.tickCounters();
+    if (!this.queues.has(address)) return null;
     const v = this.entries.get(address);
     if (!v) return null;
     return { bytesIn: v.bytesIn, bytesOut: v.bytesOut, reference: `mock:${address}` };

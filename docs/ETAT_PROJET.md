@@ -200,8 +200,9 @@ JS pur : l'app n'écrit **aucun** identifiant routeur (tout passe par l'agent).
 - `docs/MIKROTIK_MISE_EN_TEST.md` : prérequis RouterOS (SSID isolé, IPv6 coupé
   sur le SSID de test, liste `wz-active`), secrets serveur
   (`NETWORK_ADAPTER_TYPE`, `MIKROTIK_HOST`, `NETWORK_HMAC_SECRET`,
-  `MIKROTIK_MOCK`), enrôlement agent (`agent/register.mjs` + INSERT
-  `local_agents` avec sha256), procédure de test, rollback, limites.
+  `MIKROTIK_MOCK` / `MIKROTIK_REAL`, cf. §9.1), enrôlement agent
+  (`agent/register.mjs` + INSERT `local_agents` avec sha256), procédure de
+  test, rollback, limites.
 - `scripts/e2e-mikrotik-chain.mjs` : E2E contre le vrai serveur avec
   `AgentEngine` + `MockRouter` (JWT démo → `request-wifi-session` → commande
   signée → agent → `active` → compteurs → `end-wifi-session`). Syntaxe
@@ -227,15 +228,19 @@ JS pur : l'app n'écrit **aucun** identifiant routeur (tout passe par l'agent).
 1. **`agent-reconcile`** : restaurer les sessions actives après reboot routeur
    (re-enqueue signé `authorize` si heartbeat frais ; coupe `NETWORK_LOST`
    seulement si heartbeat périmé). Non commencé.
-2. **`network-health`** : vérifier la shape `agents/routers/routerOnline/
-   simulated` (fallbacks déjà en place dans `healthCheckDetail`, à confirmer
-   contre le vrai endpoint) et exposer `simulated` via `MIKROTIK_MOCK`.
+2. **`network-health`** : ~~vérifier la shape `agents/routers/routerOnline/
+   simulated`~~ **FAIT** — la shape est en place et le champ `simulated` est
+   exposé, mais selon une sémantique **fail closed** qui n'est plus
+   `MIKROTIK_MOCK` seul (cf. §9.1).
 
 **Côté exploitation (demain, J1 — nécessite l'utilisateur / le routeur) :**
 
 3. **Secrets serveur** (`supabase secrets set`, CLI `2.115.0`) :
    `NETWORK_ADAPTER_TYPE=mikrotik`, `MIKROTIK_HOST`, `NETWORK_HMAC_SECRET`,
-   `WIFI_LIST_NAME=wz-active`, `MIKROTIK_MOCK=1`.
+   `WIFI_LIST_NAME=wz-active`, puis **le bon drapeau d'honnêteté selon la
+   situation** (cf. §9.1 — c'est l'erreur la plus coûteuse de cette étape) :
+   - routeur **non** branché (recette simulée) : `MIKROTIK_MOCK=1` ;
+   - routeur **réellement** branché : `MIKROTIK_REAL=1`.
 4. **Enrôlement agent** : `node agent/register.mjs "<token>"` → INSERT
    `local_agents` (org/site démo) + `agent/.env`
    (`AGENT_TOKEN`, `SUPABASE_URL`, `NETWORK_HMAC_SECRET`, creds RouterOS).
@@ -248,18 +253,67 @@ JS pur : l'app n'écrit **aucun** identifiant routeur (tout passe par l'agent).
 **Baseline à préserver : tous les scénarios de la recette (pubs, quota,
 déconnexion) passaient (§4.1) — à rejouer sur le socle après ces changements.
 
+### 9.1 Sémantique du drapeau d'honnêteté réseau — `MIKROTIK_REAL` (fail closed)
+
+> **À lire avant de poser les secrets serveur.** C'est l'étape où il est
+> le plus facile de faire afficher « routeur réel » alors qu'il n'y en a pas.
+
+L'agent local choisit son pilote par l'**argument CLI `--mock`**, dans son
+propre processus. La fonction serveur **ne voit pas cet argument** : elle ne
+peut donc pas savoir, toute seule, si du matériel existe derrière
+`MIKROTIK_HOST`. Conséquence : la seule façon de lever le doute est une
+**confirmation explicite de l'opérateur**.
+
+| Serveur | `simulated` retourné | Ce que l'app affiche |
+| --- | --- | --- |
+| `MIKROTIK_MOCK=1` | `true` | « routeur simulé », compteurs masqués |
+| `MIKROTIK_REAL=1` (et pas de `MOCK`) | `false` | « Accès réseau réel (MikroTik) » |
+| **aucun des deux** | `true` | « routeur simulé » — **prudent par défaut** |
+| les deux posés | `true` | la simulation l'emporte |
+
+Valeurs « vraies » acceptées : `1`, `true`, `yes`, `on` (insensible à la casse
+et aux espaces).
+
+Côté client (`src/network/index.ts`, `readNetworkDetail`), un champ
+`simulated` **absent** de la réponse est traité comme *non confirmé* ⇒
+`agentSimulated: true`. Un déploiement serveur antérieur à ce champ, ou une
+réponse tronquée, affichent donc « simulé » au lieu d'affirmer un routeur réel
+que personne n'a confirmé.
+
+Règle opératoire :
+
+- **ne jamais poser `MIKROTIK_REAL=1` avant que le routeur soit branché** ;
+- changer de mode = changer le drapeau (et relancer la fonction), pas l'inverse ;
+- `MIKROTIK_MOCK` est prioritaire : en cas de doute, c'est la valeur sûre.
+
+Correctif de fond non fait à ce jour : faire remonter le mode `--mock` de
+l'agent dans son heartbeat (`local_agents` + RPC `record_agent_heartbeat`)
+pour que le serveur n'ait plus à êtrecru sur parole. Exige une migration
+0017 et n'est pas validable ici sans base Supabase.
+
 ---
 
 ## 10. Prochaines étapes (à valider avec l'utilisateur)
+
+> **L'opérateur branchera le hAP ac² à la prochaine séance ; la
+> configuration et le câblage réels seront poursuivis à ce moment-là.**
+> Séquence de branchement, preuves attendues et points à mesurer :
+> `docs/MIKROTIK_MISE_EN_SERVICE.md` **§10**.
 
 1. **J1 test MikroTik** : configurer le routeur (SSID isolé, IPv6 coupé),
    poser les secrets serveur, enrôler l'agent, lancer `e2e-mikrotik-chain.mjs`
    en simulé puis le flux réel sur le téléphone.
 2. **`agent-reconcile`** : restauration des sessions actives après reboot
    routeur (cf. §9).
-3. Ajuster `network-health` (shape `simulated` via `MIKROTIK_MOCK`).
+3. Ajuster `network-health` — **fait** : `simulated` est exposé, en fail closed
+   sur `MIKROTIK_REAL` (cf. §9.1). Reste à rejouer contre le vrai endpoint.
 4. Rejouer la recette complète pubs/quota/déconnexion sur le socle MikroTik
    et vérifier l'état natif `setAuthorized`/`gen` (artefact `BLOCKED
    gen=1 ttlLeftMs=0` de §4.1).
-5. Déployer le fix RLS `devices_self_update` (aligner la policy production
-   sur la migration 0003).
+5. Déployer le fix RLS `devices_self_update` — **écrit** dans
+   `0016_devices_rls_upsert_safe.sql` (policy sans sous-requête récursive +
+   déclencheur de garde `status`, `register-device` en `service_role`).
+   Reste à l'**appliquer** à la base avant le test téléphone ; la migration
+   0003 en production est aujourd'hui alignée sur cette politique.
+6. migration 0017 : faire remonter le mode `--mock` de l'agent dans son
+   heartbeat pour supprimer la désynchronisation de drapeaux décrite au §9.1.

@@ -36,6 +36,20 @@
         "EXPO_PUBLIC_DEFAULT_SITE_ID": "d9fe1d87-b4a8-4b92-8ebc-d213b2929e8d"
       }
     },
+    "terrain": {
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "internal",
+      "channel": "terrain",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://hwwivzsdepzdgonfbkxq.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_073mrmQaC-H6oBfU-Fg52g_7MUCvjrs",
+        "EXPO_PUBLIC_APP_ENV": "development",
+        "EXPO_PUBLIC_NETWORK_MODE": "mikrotik",
+        "EXPO_PUBLIC_DEFAULT_SITE_ID": "d9fe1d87-b4a8-4b92-8ebc-d213b2929e8d"
+      }
+    },
     "production": {
       "android": {
         "buildType": "app-bundle"

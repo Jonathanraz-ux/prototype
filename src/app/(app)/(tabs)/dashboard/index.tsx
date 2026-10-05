@@ -9,9 +9,10 @@ import { Play, Power, AlertTriangle, ServerCog, Wrench, RefreshCw } from "lucide
 import HeroAdCard from "../../../../components/HeroAdCard";
 import ConnectionStatusCard from "../../../../components/ConnectionStatusCard";
 import AppHeader from "../../../../components/AppHeader";
+import AccountSection from "../../../../components/AccountSection";
 import RefreshButton from "../../../../components/RefreshButton";
 import { isDevModeEnabled } from "../../../../lib/config";
-import { TAB_BAR_CLEARANCE, TAB_BAR_MARGIN } from "../../../../lib/tabBarMetrics";
+import { floatingNavClearance } from "../../../../lib/floatingNav";
 import { ScrollView } from "react-native";
 
 export default function DashboardScreen() {
@@ -28,6 +29,7 @@ export default function DashboardScreen() {
     currentAd,
     networkHealth,
     networkProviderKind,
+    networkAgentSimulated,
     lastSyncAt,
     isResuming,
   } = useConnection();
@@ -182,7 +184,13 @@ export default function DashboardScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 10 }]}>
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + TAB_BAR_MARGIN }]}
+        contentContainerStyle={[
+          styles.container,
+          // Espace de défilement réel : le bouton « Se déconnecter » (fin de
+          // la section « Mon compte ») reste au-dessus des boutons flottants
+          // Accueil / Naviguer, qui sont superposés en bas d'écran.
+          { paddingBottom: floatingNavClearance(insets.bottom) + 20 }
+        ]}
         showsVerticalScrollIndicator={false}
       >
         <Animated.View style={{ gap: 14, opacity: fadeAnim }}>
@@ -190,6 +198,8 @@ export default function DashboardScreen() {
             title={`Bonjour ${user?.firstName ?? ""}`}
             subtitle="Connexion financée par la publicité"
             right={<RefreshButton refreshing={isRefreshing} onPress={handleRefresh} />}
+            applyTopInset={false}
+            horizontalPadding={0}
           />
 
           <ConnectionStatusCard
@@ -202,8 +212,9 @@ export default function DashboardScreen() {
             totalQuotaMB={usage.totalQuotaMB}
             networkHealth={networkHealth}
             providerKind={networkProviderKind}
+            agentSimulated={networkAgentSimulated}
             lastSyncAt={lastSyncAt}
-            meterTrusted={networkProviderKind === "live"}
+            meterTrusted={networkProviderKind === "live" && !networkAgentSimulated}
           />
 
           <View style={{ height: 260 }}>
@@ -234,6 +245,12 @@ export default function DashboardScreen() {
               <Text style={styles.linkText}>Espace de développement</Text>
             </Pressable>
           )}
+
+          {/* Section « Mon compte » : toutes les informations et actions de
+              l'ancien écran Profil, dont « Se déconnecter » en dernière
+              position (défilement nécessaire, jamais masqué par les boutons
+              flottants). */}
+          <AccountSection />
         </Animated.View>
       </ScrollView>
     </View>
@@ -242,7 +259,7 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
-  container: { flex: 1, paddingHorizontal: 20, paddingBottom: 104, gap: 14 },
+  container: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 4, gap: 14 },
   stateNote: { color: COLORS.textMuted, fontSize: 12.5, textAlign: "center", fontFamily: "Inter-Regular" },
   reason: { color: COLORS.warning, fontSize: 12, textAlign: "center", fontFamily: "Inter-Regular" },
   actionButton: {

@@ -9,7 +9,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
 } from "../../../repositories/notificationRepository";
-import { formatDate } from "../../../hooks";
+import { formatDate } from "../../../lib/formatDate";
 import StackHeader from "../../../components/StackHeader";
 import type { AppNotification } from "../../../types";
 

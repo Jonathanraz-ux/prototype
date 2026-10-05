@@ -1,5 +1,10 @@
 # MikroTik — Préparation du test (mercredi)
 
+> ⚠ **Document de préparation, dépassé sur deux points.** Pour le jour J,
+> préférer **[`MIKROTIK_MISE_EN_SERVICE.md`](MIKROTIK_MISE_EN_SERVICE.md)**,
+> qui fait autorité (préflight, dépannage, retrait de file garanti).
+> Les corrections appoortées ici sont listées en fin de document.
+
 > **État** : le code est écrit et testé. L'intégration matérielle
 > (routeur MikroTik physique) est **NON VALIDÉE** — le test physique
 > est prévu mercredi. Tous les scénarios ont été validés via mock agent
@@ -48,6 +53,7 @@ supabase secrets set \
   MIKROTIK_HOST=<IP_LAN_DU_ROUTEUR> \
   NETWORK_HMAC_SECRET=<secret-minimum-32-caracteres> \
   WIFI_LIST_NAME=wz-active \
+  MIKROTIK_REAL=1 \
   --project-ref hwwivzsdepzdgonfbkxq
 ```
 
@@ -58,9 +64,32 @@ supabase secrets set \
 > `NETWORK_HMAC_SECRET` : **jamais le même que le JWT management**. Générer :
 > `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 
-> **Simulé** (pour test sans routeur) : ajouter `MIKROTIK_MOCK=1` pour que le
-> health endpoint signale `simulated: true` (l'UI affichera un badge).
-> Le `MIKROTIK_HOST` reste requis pour que `configured=true`.
+#### 2.1.1 `MIKROTIK_REAL` / `MIKROTIK_MOCK` — l'étape la plus sensible
+
+L'agent choisit son pilote avec l'argument CLI `--mock` (voir §3). La fonction
+serveur **ne voit pas cet argument** : elle ne peut savoir seule si du matériel
+existe. Le serveur est donc **fail closed** : sans confirmation explicite, il
+signale `simulated: true` et l'UI affiche « routeur simulé » (les compteurs
+sont masqués). Le libellé « Accès réseau réel (MikroTik) » n'apparaît que si
+`MIKROTIK_REAL=1` est posé.
+
+| Situation | Drapeau serveur | Effet |
+| --- | --- | --- |
+| Routeur branché (test J1) | `MIKROTIK_REAL=1` | « Accès réseau réel », compteurs visibles |
+| Pas de routeur (recette simulée) | `MIKROTIK_MOCK=1` | « routeur simulé », compteurs masqués |
+| Ni l'un ni l'autre | — | « routeur simulé » (prudent) |
+| Les deux | `MIKROTIK_MOCK=1` gagne | « routeur simulé » |
+
+Valeurs acceptées : `1`, `true`, `yes`, `on` (casse et espaces ignorés).
+
+> ⚠️ **Poser `MIKROTIK_REAL=1` alors qu'aucun routeur n'est branché fait
+> afficher un accès « réel » qui n'existe pas.** C'est précisément l'erreur
+> que ce mode fail closed cherche à empêcher. Inversement, oubli de
+> `MIKROTIK_REAL=1` avec un vrai routeur branché n'est pas grave : l'app
+> affiche « simulé » et les tests passent au vert, ce qui force à vérifier.
+
+> Passer d'un mode à l'autre = `supabase secrets set` puis redéploiement de
+> `network-health`. Ne pas changer le drapeau en cours de test sans le dire.
 
 ### 2.2 Enrôler un agent de test
 
@@ -107,6 +136,18 @@ AGENT_EXPIRE_INTERVAL_MS=30000
 AGENT_MOCK_BYTES_PER_SEC=120000
 ```
 
+> ⚠️ **Les deux côtés doivent être d'accord.** Le pilote de l'agent est choisi
+> par l'argument CLI `--mock` au lancement (`node main.mjs --mock`, ou
+> `.\agent\start.ps1 -Mock`) ; l'étiquette affichée par l'app, elle, vient du
+> secret serveur (§2.1.1). Ce sont deux processus distincts : le serveur ne
+> détecte pas `--mock`. Si l'agent tourne en simulation, le serveur doit donc
+> porter `MIKROTIK_MOCK=1` — sinon l'app affiche « Accès réseau réel » pendant
+> que le trafic est simulé, ce qu'aucun test automatisé ne peut détecter.
+>
+> Checklist de cohérence avant de lancer un test :
+> - agent **avec** `--mock` ⇒ serveur `MIKROTIK_MOCK=1` (ou rien) ;
+> - agent **sans** `--mock`, routeur joignable ⇒ serveur `MIKROTIK_REAL=1`.
+
 ---
 
 ## 3. Routeur MikroTik — Prérequis de test
@@ -122,12 +163,22 @@ AGENT_MOCK_BYTES_PER_SEC=120000
 
 ### 3.2 Liste d'adresses pour le contrôle
 
+Utiliser le script `docs/routeros/bojo-setup.rsc`, qui pose la liste et les
+règles firewall en une fois. L'entrée de réservation servant à faire
+exister la liste est `192.0.2.1/32` (TEST-NET-1, RFC 5737 — jamais
+attribuable à un client réel) :
+
 ```
-/ip/firewall/address-list/add list=wz-active address=0.0.0.0 comment="placeholder"
+/ip firewall address-list/add list=wz-active address=192.0.2.1/32 \
+    comment="placeholder WiFi Zone (jamais un client reel)" disabled=yes
 ```
 
-> L'agent créera automatiquement des entrées `wz:<session_id_8chars>` pour
-> chaque session autorisée.
+> ⚠ Ne **pas** utiliser `address=0.0.0.0` comme placeholder : c'est
+> l'adresse « unspecified », inerte mais susceptible de perturber les
+> règles de filtrage.
+>
+> L'agent créera ensuite automatiquement des entrées `wz:<session_id_8chars>`
+> pour chaque session autorisée.
 
 ### 3.3 Options de sécurité (si requises)
 
@@ -137,16 +188,22 @@ AGENT_MOCK_BYTES_PER_SEC=120000
 | Limite de débit globale | `/queue/simple` | L'agent gère la création automatique par session |
 | Journaux | `/log print` | Utile pour le debug premier jour |
 
-### 3.4 Walled Garden (optionnel, pré-Autorisation)
+### 3.4 Walled Garden (optionnel, pré-autorisation)
 
 Avant qu'une session ne soit autorisée, seuls les sites essentiels sont accessibles :
 - Supabase (`hwwivzsdepzdgonfbkxq.supabase.co`)
 - Publicités (campagnes Google AdMob / serveur pub)
 - DNS public (1.1.1.1 / 8.8.8.8)
 
-> La commande `walled_garden` est implémentée dans l'agent mais n'est pas encore
-> déclenchée automatiquement. Elle peut être envoyée manuellement via l'Edge Function
-> `enqueue_network_command` avec `type: "walled_garden"`.
+> ⚠ **La commande `walled_garden` n'est PAS implantée dans l'agent.**
+> Elle répond aujourd'hui `ok: true` avec `result.implemented: false` :
+> l'agent n'écrit aucune règle, car le filtrage dépend entièrement du
+> routeur (DNS statique, règles firewall par IP). Ce résultat explicite
+> existe pour que ni le serveur ni l'interface ne puissent laisser croire
+> qu'un walled garden est actif.
+>
+> La mise en œuvre se fait sur le routeur (`/ip/dns/static`,
+> `/ip/firewall/address-list` en liste blanche), pas via l'agent.
 
 ---
 
@@ -167,7 +224,12 @@ NETWORK_HMAC_SECRET=<secret> AGENT_TOKEN=<token> \
   node scripts/e2e-mikrotik-chain.mjs
 ```
 
-Le script affiche OK/FAIL pour chaque étape. En mode **simulé** (`MIKROTIK_MOCK=1`), il fonctionne même si le routeur n'est pas encore présent.
+Le script affiche OK/FAIL pour chaque étape. En mode **simulé** (`MIKROTIK_MOCK=1` côté serveur), il fonctionne même si le routeur n'est pas encore présent.
+
+> Rappel : le script exerce la chaîne avec un `MockRouter` local, donc il
+> valide la **logique** de bout en bout, pas le matériel. Le passage en
+> `MIKROTIK_REAL=1` (cf. §2.1.1) ne change rien à ce résultat : seul un vrai
+> routeur atteint par l'agent peut valider les compteurs.
 
 ---
 
@@ -230,9 +292,17 @@ Le mode VPN démo fonctionne **indépendamment** de MikroTik — les deux sont i
 
 ## 8. Limites connues du premier jour
 
-- **Enregistrement `register-device` 500** : bug RLS server-side (cosmétique, n'empêche pas le fonctionnement).
+- **Enregistrement `register-device` 500** : **corrigé** par la migration
+  `0016_devices_rls_upsert_safe.sql` (policy `devices_self_update` sans
+  sous-requête récursive + déclencheur de garde sur `devices.status`). Non
+  appliquée à la base de prod : à pousser avant le test.
 - **IPv6** : le routeur doit être configuré pour désactiver IPv6 sur le SSID de test ; sinon le contrôle d'accès peut être contourné.
 - **Agent mock** : les compteurs sont simulés (MockRouter). Les vrais compteurs routeur ne seront validés que le jour du test avec le routeur physique.
+- **Drapeau d'honnêteté désynchronisé** : `--mock` (agent) et
+  `MIKROTIK_REAL`/`MIKROTIK_MOCK` (serveur) sont deux canaux distincts, rien
+  ne les rapproche automatiquement. Une divergence affiche un état faux. Cf.
+  §2.1.1 et la checklist §2.3. Le correctif de fond (mode remonté dans le
+  heartbeat de l'agent) n'est pas fait.
 - **Walled Garden** : pas encore déclenché automatiquement — à configurer manuellement sur le routeur avant le test si besoin.
 
 ---
@@ -248,6 +318,8 @@ Le mode VPN démo fonctionne **indépendamment** de MikroTik — les deux sont i
 - `agent/engine.mjs` — cœur agent : commandes signées → RouterOS
 - `supabase/functions/request-wifi-session/` — début de session + enfilement commande
 - `supabase/functions/network-health/` — état chaîne serveur + agent
+- `supabase/functions/_shared/network-config.ts` — sémantique fail closed
+  `MIKROTIK_REAL` / `MIKROTIK_MOCK` (§2.1.1)
 - `supabase/functions/agent-command-fetch/` — signature HMAC + remise commande
 - `supabase/functions/agent-collect/` — delta compteurs → SQL
 - `scripts/e2e-mikrotik-chain.mjs` — test bout-en-bout sans routeur

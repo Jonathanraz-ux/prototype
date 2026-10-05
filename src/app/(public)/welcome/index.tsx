@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { Wifi, Shield, Zap } from "lucide-react-native";
 import { COLORS } from "../../../constants/theme";
 import BojoLogo from "../../../components/BojoLogo";
+import PrimaryButton from "../../../components/PrimaryButton";
 
 const FEATURES = [
   { icon: Zap, label: "Accès instantané", desc: "Connectez-vous en quelques secondes" },
@@ -54,12 +55,10 @@ export default function WelcomeScreen() {
       </Animated.View>
 
       <Animated.View style={[styles.ctaSection, { opacity: buttonAnim, transform: [{ translateY: buttonAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }] }]}>
-        <Pressable
+        <PrimaryButton
+          title="Commencer"
           onPress={() => router.push("/(public)/login")}
-          style={({ pressed }) => [styles.primaryButton, { opacity: pressed ? 0.9 : 1 }]}
-        >
-          <Text style={styles.primaryButtonText}>Commencer</Text>
-        </Pressable>
+        />
 
         <Pressable onPress={() => router.push("/(public)/register")} style={({ pressed }) => [styles.secondaryButton, { opacity: pressed ? 0.7 : 1 }]}>
           <Text style={styles.secondaryButtonText}>Créer un compte gratuitement</Text>

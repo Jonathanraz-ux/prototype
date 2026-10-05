@@ -1,11 +1,20 @@
 // ============================================================
 // network-mikrotik-authorize — Autorise une session sur un
 // routeur MikroTik (API RouterOS). Secrets serveur uniquement.
-// Nécessite un équipement réel ; sinon renvoie un état explicite.
+//
+// ⚠️ FONCTION DÉCONNECTÉE (docs/ETAT_PROJET.md §8.2).
+// La chaîne MikroTik réelle ne passe PAS par ici : l'agent local
+// exécute les commandes RouterOS signées (file `network_commands`).
+// Voir src/network/MikrotikNetworkAdapter.ts, qui utilise
+// `request-wifi-session` puis `quota-status`.
+//
+// Cette fonction reste en place comme garde-fou : elle répond
+// explicitement UNREACHABLE tant qu'aucun pilotage RouterOS direct
+// n'est câblé côté serveur. Elle ne prétend JAMAIS un accès réussi.
 // ============================================================
 
 import { handleCors, ok, fail, methodNotAllowed } from "../_shared/http.ts";
-import { resolveNetworkConfig, matchesAdapter, newSessionReference } from "../_shared/network-config.ts";
+import { resolveNetworkConfig } from "../_shared/network-config.ts";
 
 interface AuthorizeBody {
   username?: string;
@@ -34,19 +43,15 @@ export async function networkMikrotikAuthorize(req: Request): Promise<Response> 
   }
   if (!body.username) return fail("username requis", 400, "missing_username");
 
-  // Référence de session générée côté serveur pour idempotence et traçabilité.
-  const reference = newSessionReference("mk");
-
-  // 👇 Intégration RouterOS réelle à implémenter ici (libssh / API REST
-  // Mikrotik) en utilisant MIKROTIK_HOST / USERNAME / PASSWORD.
-  // Tant que l'équipement n'est pas joignable, on ne prétend pas la
-  // connexion : on renvoie UNREACHABLE.
-  const unreachable = true; // TODO: remplacer par le résultat du pilotage réel
-  if (unreachable) {
-    return ok({ success: false, health: "UNREACHABLE", reason: "unreachable" });
-  }
-
-  return ok({ success: true, reference });
+  // Aucun pilotage RouterOS direct n'est implémenté côté serveur (l'agent
+  // local s'en charge). On refuse donc explicitement plutôt que de
+  // retourner une référence de session qui n'existerait jamais.
+  return ok({
+    success: false,
+    health: "UNREACHABLE",
+    reason: "unreachable",
+    detail: "Pilotage direct non implanté : utilisez l'agent local (request-wifi-session).",
+  });
 }
 
 Deno.serve(networkMikrotikAuthorize);

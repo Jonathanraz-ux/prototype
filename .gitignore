@@ -34,6 +34,19 @@ ios/
 # build artifacts locaux (APK autonomes, classes compilées)
 *.apk
 classes/
+# dossier de recettes local (APK de recette + captures) : ~120 Mo qui
+# seraient sinon téléversés à chaque EAS Build. hors dépôt, par construction.
+build/
+*.log
+
+# captures d'écran / dumps UI de recette (racine) : jamais des assets de build
+/screen*.png
+/test_screen.png
+/ui_*.xml
+
+# rapports de provisionnement générés localement : ils contiennent le mot de
+# passe du compte wifi-agent en clair, créé à chaque exécution de provision.mjs
+agent/ignored.txt
 
 # deno (local verification of edge functions)
 deno.lock

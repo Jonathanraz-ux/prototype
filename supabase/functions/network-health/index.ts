@@ -31,11 +31,21 @@ export async function networkHealth(req: Request): Promise<Response> {
   const cfg: NetworkConfig = resolveNetworkConfig();
 
   if (body.adapter && cfg.adapterType && body.adapter !== cfg.adapterType) {
-    return ok({ configured: false, health: "NOT_CONFIGURED", adapterType: cfg.adapterType });
+    return ok({
+      configured: false,
+      health: "NOT_CONFIGURED",
+      adapterType: cfg.adapterType,
+      simulated: cfg.simulated,
+    });
   }
 
   if (!cfg.configured || !cfg.adapterType) {
-    return ok({ configured: false, health: cfg.health, adapterType: cfg.adapterType });
+    return ok({
+      configured: false,
+      health: cfg.health,
+      adapterType: cfg.adapterType,
+      simulated: cfg.simulated,
+    });
   }
 
   // Chaîne MikroTik pilotée par l'agent : pas de prétention de READY
@@ -77,6 +87,10 @@ export async function networkHealth(req: Request): Promise<Response> {
     routers,
     agentOnline,
     routerOnline,
+    // Honnêteté : l'agent peut être un agent de test branché sur
+    // mock-router.mjs. Le client DOIT alors annoncer une simulation et
+    // masquer les compteurs, même si la chaîne répond « READY ».
+    simulated: cfg.simulated,
   });
 }
 

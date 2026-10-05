@@ -46,7 +46,13 @@ export class AgentEngine {
     this.fire("ping");
     this.fire("fetch");
 
-    this.log.info(`[agent] démarré — site?, boucle ${this.env.int("AGENT_FETCH_INTERVAL_MS")}ms fetch / ${this.env.int("AGENT_PING_INTERVAL_MS")}ms ping`);
+    this.log.info(
+      `[agent] démarré — routeur ${this.router?.name ?? "?"}, ` +
+        `fetch ${this.env.int("AGENT_FETCH_INTERVAL_MS")}ms / ` +
+        `ping ${this.env.int("AGENT_PING_INTERVAL_MS")}ms / ` +
+        `collect ${this.env.int("AGENT_COLLECT_INTERVAL_MS")}ms / ` +
+        `expire ${this.env.int("AGENT_EXPIRE_INTERVAL_MS")}ms`
+    );
   }
 
   async stop() {
@@ -182,43 +188,91 @@ export class AgentEngine {
       return { ok: false, error_message: "Aucune adresse IP observable pour autoriser" };
     }
     const comment = WZ_COMMENT(sessionId);
+
+    // 1. Entrée dans la liste pilotée.
+    let reference;
     try {
       const out = await this.router.authorize({ address, comment });
-      this.sessions.set(sessionId, { address, comment });
-      this.lastCounters.set(sessionId, { bytes_in: 0, bytes_out: 0 });
+      reference = out.reference;
       this.log.info(`[agent] authorised ${address} → ${out.reference}`);
-      return {
-        ok: true,
-        result: { address, comment, reference: out.reference },
-        session_id: sessionId,
-        router_session_reference: out.reference,
-      };
     } catch (err) {
-      await this.safeDeauthorize(address);
-      return { ok: false, error_message: `Autorisation routeur échouée : ${err?.message ?? err}` };
+      return {
+        ok: false,
+        error_message: `Autorisation routeur échouée : ${err?.message ?? err}`,
+      };
     }
+
+    // 2. File de comptage : OBLIGATOIRE. Sans elle, aucun octet n'est
+    //    remonté et le quota de l'abonné reste figé — mieux vaut
+    //    refuser l'accès que d'accorder un accès non mesuré.
+    let queue;
+    try {
+      queue = await this.router.ensureQueue({ address, comment });
+    } catch (err) {
+      // Retour arrière COMPLET. La file a pu être créée sur le
+      // routeur puis faire échouer la lecture qui suit : sans ce
+      // retrait, on laisserait une file orpheline qui tourne pour
+      // une adresse à laquelle l'accès est refusé.
+      await this.safeRemoveQueue(address);
+      await this.safeDeauthorize(address);
+      return {
+        ok: false,
+        error_message:
+          `Autorisation refusée : file de comptage indisponible sur le routeur ` +
+          `(${err?.message ?? err}). Aucun accès n'est accordé sans comptage.`,
+      };
+    }
+
+    this.sessions.set(sessionId, { address, comment });
+    this.lastCounters.set(sessionId, { bytes_in: 0, bytes_out: 0 });
+    this.log.info(
+      `[agent] file ${queue.name ?? "?"} ${queue.created ? "créée" : "existante"} pour ${address}`
+    );
+    return {
+      ok: true,
+      result: { address, comment, reference, queue: queue.name ?? null },
+      session_id: sessionId,
+      router_session_reference: reference,
+    };
   }
 
   async handleDisconnect(sessionId, payload) {
     const track = this.sessions.get(sessionId);
     const address = track?.address ?? payload.device_observed_ip;
     const comment = track?.comment ?? WZ_COMMENT(sessionId);
+    // La file de comptage doit partir même si la révocation d'accès
+    // échoue : une file laissée en place continue de tourner sur le
+    // routeur pour un client qui n'a plus le droit de se connecter, et
+    // fausse les compteurs des sessions suivantes.
+    let failure = null;
     try {
       if (address) await this.router.deauthorize({ address, comment });
-      this.sessions.delete(sessionId);
-      this.lastCounters.delete(sessionId);
-      this.log.info(`[agent] disconnected ${address ?? sessionId} (${payload.reason ?? "?"})`);
-      return { ok: true, result: { address, reason: payload.reason } };
     } catch (err) {
-      return { ok: false, error_message: `Déconnexion routeur échouée : ${err?.message ?? err}` };
+      failure = err;
     }
+    if (address) await this.safeRemoveQueue(address);
+    this.sessions.delete(sessionId);
+    this.lastCounters.delete(sessionId);
+    if (failure) {
+      this.log.warn(
+        `[agent] révocation d'accès échouée pour ${address} (${failure?.message ?? failure}) ` +
+          "— la file de comptage a néanmoins été supprimée"
+      );
+      return {
+        ok: false,
+        error_message: `Déconnexion routeur partielle : accès non révoqué (${failure?.message ?? failure})`,
+      };
+    }
+    this.log.info(`[agent] disconnected ${address ?? sessionId} (${payload.reason ?? "?"})`);
+    return { ok: true, result: { address, reason: payload.reason } };
   }
 
   async handleCollect(sessionId, payload) {
     const track = this.sessions.get(sessionId);
     const address = track?.address ?? payload.device_observed_ip;
-    const usage = await this.router.queueUsage(address);
-    if (!usage) return { ok: false, error_message: `Aucune queue pour ${address ?? sessionId}` };
+    const comment = track?.comment ?? WZ_COMMENT(sessionId);
+    const usage = await this.measure(address, comment);
+    if (!usage) return { ok: false, error_message: `Aucune file de comptage pour ${address ?? sessionId}` };
     try {
       const res = await this.call("agent-collect", {
         session_id: sessionId,
@@ -236,14 +290,42 @@ export class AgentEngine {
     return { ok: true, result: { clients: clients.slice(0, 100), count: clients.length } };
   }
 
+  /**
+   * Walled garden — VOLONTAIREMENT non implanté côté agent : la
+   * liste blanche dépend entièrement du routeur (DNS statique, règles
+   * firewall par IP). On renvoie donc un résultat EXPLICITE
+   * `implemented: false` : ni le serveur ni l'interface ne peuvent
+   * laisser croire qu'un walled garden est actif, et la commande
+   * n'échoue pas (elle n'est pas dans le chemin critique de la
+   * session). Le comportement réseau reste celui du routeur.
+   */
   async handleWalledGarden(payload) {
-    const clients = await this.router.clients();
-    return { ok: true, result: { clients: clients.slice(0, 100), list: this.router.listName } };
+    this.log.warn(
+      "[agent] commande walled_garden reçue : non implantée (à configurer sur le routeur), aucune action"
+    );
+    return {
+      ok: true,
+      result: {
+        implemented: false,
+        list: this.router.listName,
+        note: "Le walled garden se configure sur le routeur (adresse-list + DNS), pas via l'agent.",
+      },
+    };
   }
 
   async safeDeauthorize(address) {
     try {
       if (address) await this.router.deauthorize({ address });
+    } catch {
+      /* best effort */
+    }
+  }
+
+  async safeRemoveQueue(address) {
+    try {
+      if (address && typeof this.router.removeQueue === "function") {
+        await this.router.removeQueue({ address });
+      }
     } catch {
       /* best effort */
     }
@@ -258,12 +340,49 @@ export class AgentEngine {
     return res;
   }
 
+  /**
+   * Mesure les compteurs d'un client et RÉPARE la file si elle a
+   * disparu (redémarrage du routeur : les files simples et les
+   * entrées d'address-list ajoutées par l'API ne sont pas persistées
+   * tant que la configuration n'a pas été sauvegardée).
+   *
+   * Sécurité métier : le serveur calcule le delta et le borne à 0
+   * (`greatest(compteur - dernier, 0)`), donc une reprise de comptage
+   * après reboot ne peut jamais facturer à l'abonné plus que le
+   * trafic réellement écoulé — au pire, la fenêtre de reboot n'est
+   * pas comptée.
+   */
+  async measure(address, comment) {
+    if (!address) return null;
+    let usage = await this.router.queueUsage(address);
+    if (!usage && typeof this.router.ensureQueue === "function") {
+      const recreated = await this.router.ensureQueue({ address, comment });
+      usage = await this.router.queueUsage(address);
+      this.log.warn(
+        `[agent] file de comptage disparue pour ${address} — recréée (${recreated.name ?? "?"})`
+      );
+    }
+    if (!usage) {
+      // File introuvable OU file dont le routeur ne renvoie aucun
+      // compteur. Les deux cas se traitent pareil et c'est
+      // VOLONTAIRE : on ne remonte rien plutôt qu'un « 0 octet »,
+      // qui ferait croire à une mesure. Le serveur borne le delta à 0,
+      // donc la sous-comptée qui en découle ne peut jamais
+      // sur-facturer un abonné.
+      this.log.warn(
+        `[agent] aucune mesure exploitable pour ${address} — aucun octet remonté ` +
+          "(file absente ou compteurs illisibles sur le routeur)"
+      );
+    }
+    return usage ?? null;
+  }
+
   // ---- Collecte périodique --------------------------------------
 
   async tickCollect() {
     for (const [sessionId, track] of [...this.sessions.entries()]) {
       try {
-        const usage = await this.router.queueUsage(track.address);
+        const usage = await this.measure(track.address, track.comment);
         if (!usage) continue;
         // Le serveur calcule lui-même le delta depuis la dernière mesure
         // (apply_data_usage) : on remonte les compteurs CUMULÉS du routeur.

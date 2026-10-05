@@ -1,5 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, Keyboard } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  StyleSheet,
+  ActivityIndicator,
+  Keyboard,
+  useWindowDimensions
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import {
@@ -7,14 +16,12 @@ import {
   type WebViewNavigation,
 } from "react-native-webview";
 import {
-  Search,
   ArrowUpRight,
   Globe,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
   AlertTriangle,
-  House,
 } from "lucide-react-native";
 import { COLORS, RADIUS } from "../../../../constants/theme";
 import AppHeader from "../../../../components/AppHeader";
@@ -23,7 +30,9 @@ import BrowseSuspensionScreen from "../../../../components/BrowseSuspensionScree
 import BrowseSuspensionOverlay from "../../../../components/BrowseSuspensionOverlay";
 import { useConnection } from "../../../../contexts/ConnectionContext";
 import { useNetworkTransport } from "../../../../services/networkTransport";
-import { TAB_BAR_CLEARANCE, TAB_BAR_MARGIN } from "../../../../lib/tabBarMetrics";
+import { FLOATING_NAV_CLEARANCE } from "../../../../lib/floatingNav";
+import { browseAdZoneHeight, browseWebZoneHeight } from "../../../../lib/browseLayout";
+import { useKeyboardVisible } from "../../../../hooks/useKeyboardVisible";
 import {
   browseGateDecision,
   type BrowseGateReason,
@@ -100,10 +109,34 @@ interface NavState {
 
 const INITIAL_NAV: NavState = { canGoBack: false, canGoForward: false, loading: true, currentUrl: GOOGLE_HOME_URL };
 
+/**
+ * Écran « Naviguer ».
+ *
+ * Deux zones de hauteur CALCULÉE sur la surface réellement disponible
+ * (hauteur de fenêtre − barres système), sans chevauchement :
+ *
+ *   ┌──────────────────────────────┐  ← 2/3 : navigateur
+ *   │ en-tête compact (1 ligne)    │
+ *   │ barre d'adresse              │
+ *   │ précédent / suivant /        │
+ *   │ actualiser / page Google     │
+ *   │ WebView (tout l'espace       │
+ *   │ restant, pleine largeur)     │
+ *   ├──────────────────────────────┤  ← 1/3 : zone publicitaire
+ *   │ création PUB en « contain »  │  (fixe au défilement de la page,
+ *   │ [Accueil] [Naviguer]         │   les boutons flottants sont
+ *   └──────────────────────────────┘   superposés dans sa partie basse)
+ *
+ * La publicité est une place RÉSERVÉE dans la mise en page (frère de la
+ * WebView, jamais un overlay) : elle ne peut donc ni recouvrir la WebView
+ * ni être comprimée par la navigation.
+ */
 export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const webRef = useRef<WebView>(null);
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardVisible = useKeyboardVisible();
 
   const { state, currentAd, vpnStatus, renewNow } = useConnection();
   const transport = useNetworkTransport(5000);
@@ -117,6 +150,20 @@ export default function BrowseScreen() {
   const [resumeNonce, setResumeNonce] = useState(0);
 
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hauteur RÉELLEMENT exploitable : la fenêtre moins les barres système
+  // Android (barre de statut en haut, barre de navigation / gestes en bas).
+  // La répartition 2/3 − 1/3 en découle, sans valeur codée en dur.
+  const usableHeight = Math.max(0, windowHeight - insets.top - insets.bottom);
+  const zoneOptions = useMemo(
+    () => ({ usableHeight, keyboardVisible }),
+    [usableHeight, keyboardVisible]
+  );
+  const webZoneHeight = browseWebZoneHeight(zoneOptions);
+  const adZoneHeight = browseAdZoneHeight(zoneOptions);
+  // Les boutons flottants se retirent au clavier ouvert : la marge interne
+  // de la publicité disparaît avec eux (aucune place vide béante).
+  const adContentInset = keyboardVisible ? 0 : FLOATING_NAV_CLEARANCE;
 
   // Décision pure de navigation (session + publicité + réseau). La WebView
   // n'est montée qu'à l'état autorisé ; toute autre condition suspend
@@ -143,7 +190,7 @@ export default function BrowseScreen() {
   suspendedRef.current = suspended;
   const preservedRef = useRef(false);
 
-// Suspension effective : arrêt des chargements/médias de la page. Si la
+  // Suspension effective : arrêt des chargements/médias de la page. Si la
   // suspension est COURTE (verifying/authorizing/paused/preparing_ad), la page
   // et son historique sont CONSERVÉS (gelés derrière le voile) ; sinon
   // (offline, fin de session, quota, erreur), la WebView est démontée et la
@@ -285,7 +332,7 @@ export default function BrowseScreen() {
       accessibilityLabel={opts.accessibilityLabel}
       style={({ pressed }) => [
         styles.toolButton,
-        { opacity: opts.disabled ? 0.35 : pressed ? 0.7 : 1 },
+        { opacity: opts.disabled ? 0.35 : pressed ? 0.7 : 1 }
       ]}
     >
       {opts.children}
@@ -293,202 +340,202 @@ export default function BrowseScreen() {
   );
 
   return (
-    <View
-      style={[
-        styles.screen,
-        {
-          paddingTop: insets.top + 10,
-          // Réserve l'espace réellement occupé par la barre d'onglets flottante
-          // et les barres système : la bande publicitaire reste visible
-          // AU-DESSUS des onglets, jamais recouverte par eux.
-          paddingBottom: insets.bottom + TAB_BAR_CLEARANCE + TAB_BAR_MARGIN,
-        },
-      ]}
-    >
-      <View style={{ paddingHorizontal: 20 }}>
-        <AppHeader title="Naviguer" subtitle="Internet Bôjô pour tous" />
-      </View>
-
-      <View style={styles.addressRow}>
-        <Pressable
-          disabled={suspended}
-          onPress={() => navigate(GOOGLE_HOME_URL)}
-          accessibilityLabel="Raccourci Google"
-          style={({ pressed }) => [
-            styles.googleTile,
-            { opacity: suspended ? 0.4 : pressed ? 0.8 : 1 },
-          ]}
-        >
-          <Search color={COLORS.actionFg} size={16} />
-          <Text style={styles.googleTileText}>Google</Text>
-        </Pressable>
-
-        <View style={styles.inputWrap}>
-          <Globe color={COLORS.textSecondary} size={16} />
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            onSubmitEditing={submit}
-            onFocus={() => setEditing(true)}
-            onBlur={() => setEditing(false)}
-            returnKeyType="go"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            keyboardAppearance="dark"
-            style={styles.input}
-            selectTextOnFocus
-            editable={!suspended}
-            accessibilityLabel="Adresse ou recherche"
+    // paddingTop/Bottom = EXACTEMENT les insets système : la somme des deux
+    // zones (webZoneHeight + adZoneHeight) remplit alors la hauteur utile au
+    // pixel près, sans débordement sous la barre de navigation Android.
+    <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      {/* ── Zone navigateur : deux tiers supérieurs ───────────────────── */}
+      <View style={[styles.browserZone, { height: webZoneHeight }]}>
+        {/* En-tête compact : une seule ligne, slogan inclus (l'inset haut est
+            déjà posé par l'écran — pas de double marge système). */}
+        <View style={styles.headerRow}>
+          <AppHeader
+            title="Naviguer"
+            subtitle="Internet Bôjô pour tous"
+            applyTopInset={false}
+            compact
+            horizontalPadding={0}
           />
-          {navState.loading && (
-            <ActivityIndicator size="small" color={COLORS.actionFg} />
-          )}
         </View>
 
-        <Pressable
-          disabled={suspended}
-          onPress={submit}
-          hitSlop={6}
-          accessibilityLabel="Aller à l'adresse ou lancer la recherche"
-          style={({ pressed }) => [
-            styles.goButton,
-            { opacity: suspended ? 0.4 : pressed ? 0.7 : 1 },
-          ]}
-        >
-          <ArrowUpRight color={COLORS.actionFg} size={20} />
-        </Pressable>
-      </View>
-
-      <View style={styles.toolbar}>
-        {renderToolbarButton({
-          onPress: () => webRef.current?.goBack(),
-          disabled: suspended || !navState.canGoBack,
-          accessibilityLabel: "Page précédente",
-          children: <ChevronLeft color={COLORS.textPrimary} size={20} />,
-        })}
-        {renderToolbarButton({
-          onPress: () => webRef.current?.goForward(),
-          disabled: suspended || !navState.canGoForward,
-          accessibilityLabel: "Page suivante",
-          children: <ChevronRight color={COLORS.textPrimary} size={20} />,
-        })}
-        {renderToolbarButton({
-          onPress: () =>
-            navState.loading ? webRef.current?.stopLoading() : webRef.current?.reload(),
-          disabled: suspended,
-          accessibilityLabel: navState.loading ? "Arrêter le chargement" : "Actualiser",
-          children: (
-            <View style={styles.refreshWrap}>
-              {navState.loading ? (
-                <ActivityIndicator size="small" color={COLORS.textPrimary} />
-              ) : (
-                <RefreshCw color={COLORS.textPrimary} size={19} />
-              )}
-            </View>
-          ),
-        })}
-        <View style={styles.toolbarSpacer} />
-        <Pressable
-          disabled={suspended}
-          onPress={() => navigate(GOOGLE_HOME_URL)}
-          hitSlop={6}
-          accessibilityLabel="Accueil Google"
-          style={({ pressed }) => [
-            styles.toolButton,
-            { opacity: suspended ? 0.35 : pressed ? 0.7 : 1 },
-          ]}
-        >
-          <House color={COLORS.textPrimary} size={19} />
-        </Pressable>
-      </View>
-
-      {notice ? (
-        <View style={styles.noticeRow}>
-          <AlertTriangle color={COLORS.warning} size={13} />
-          <Text style={styles.noticeText}>{notice}</Text>
-        </View>
-      ) : null}
-
-      <View style={styles.webArea}>
-        {suspended && !preserve ? (
-          <BrowseSuspensionScreen
-            reason={suspendReason ?? "no_session"}
-            onGoHome={() => router.push("/(app)/(tabs)/dashboard")}
-          />
-        ) : (
-          <View style={styles.webFrame}>
-            <WebView
-              key={`web-${resumeNonce}`}
-              ref={webRef}
-              source={{ uri: sourceUrl }}
-              style={styles.webview}
-              startInLoadingState
-              javaScriptEnabled
-              domStorageEnabled
-              thirdPartyCookiesEnabled
-              decelerationRate="normal"
-              allowsBackForwardNavigationGestures
-              setSupportMultipleWindows={false}
-              originWhitelist={["http://*", "https://*"]}
-              mixedContentMode="never"
-              allowsFullscreenVideo={false}
-              injectedJavaScript={NEW_WINDOW_HANDLER_JS}
-              onShouldStartLoadWithRequest={shouldStartLoad}
-              onLoadStart={handleLoadStart}
-              onNavigationStateChange={handleNavigationStateChange}
-              onError={handleWebError}
-              onHttpError={handleHttpError}
+        <View style={styles.addressRow}>
+          <View style={styles.inputWrap}>
+            <Globe color={COLORS.textSecondary} size={16} />
+            <TextInput
+              value={input}
+              onChangeText={setInput}
+              onSubmitEditing={submit}
+              onFocus={() => setEditing(true)}
+              onBlur={() => setEditing(false)}
+              returnKeyType="go"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              keyboardAppearance="dark"
+              style={styles.input}
+              selectTextOnFocus
+              editable={!suspended}
+              accessibilityLabel="Adresse ou recherche"
             />
-            {suspended && preserve && (
-              <BrowseSuspensionOverlay
-                reason={suspendReason ?? "verifying"}
-                onRetry={() => {
-                  // Re-validation immédiate : la page reste gelée tant que
-                  // l'accès n'est pas re-confirmé (aucune navigation possible).
-                  void renewNow();
-                }}
-              />
+            {navState.loading && (
+              <ActivityIndicator size="small" color={COLORS.actionFg} />
             )}
           </View>
-        )}
 
-        {!suspended && loadError && (
-          <View style={styles.errorOverlay}>
-            <View style={styles.errorIcon}>
-              <AlertTriangle color={COLORS.warning} size={26} />
-            </View>
-            <Text style={styles.errorTitle}>{loadError.title}</Text>
-            <Text style={styles.errorDetail}>{loadError.detail}</Text>
-            <View style={styles.errorActions}>
-              <Pressable
-                onPress={() => {
-                  setLoadError(null);
-                  webRef.current?.reload();
-                }}
-                style={({ pressed }) => [styles.errorRetry, { opacity: pressed ? 0.8 : 1 }]}
-              >
-                <RefreshCw color={COLORS.actionFg} size={15} />
-                <Text style={styles.errorRetryText}>Réessayer</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => navigate(GOOGLE_HOME_URL)}
-                style={({ pressed }) => [styles.errorHome, { opacity: pressed ? 0.8 : 1 }]}
-              >
-                <House color={COLORS.textPrimary} size={15} />
-                <Text style={styles.errorHomeText}>Accueil</Text>
-              </Pressable>
-            </View>
+          <Pressable
+            disabled={suspended}
+            onPress={submit}
+            hitSlop={6}
+            accessibilityLabel="Aller à l'adresse ou lancer la recherche"
+            style={({ pressed }) => [
+              styles.goButton,
+              { opacity: suspended ? 0.4 : pressed ? 0.7 : 1 }
+            ]}
+          >
+            <ArrowUpRight color={COLORS.actionFg} size={20} />
+          </Pressable>
+        </View>
+
+        {/* Commandes utiles : précédent, suivant, actualiser et retour à la
+            page de DÉPART du navigateur. Ce dernier bouton est étiqueté
+            « Google » (icône Globe) pour ne pas être confondu avec l'onglet
+            « Accueil » de Bôjô (icône Home, bouton flottant). */}
+        <View style={styles.toolbar}>
+          {renderToolbarButton({
+            onPress: () => webRef.current?.goBack(),
+            disabled: suspended || !navState.canGoBack,
+            accessibilityLabel: "Page précédente",
+            children: <ChevronLeft color={COLORS.textPrimary} size={20} />,
+          })}
+          {renderToolbarButton({
+            onPress: () => webRef.current?.goForward(),
+            disabled: suspended || !navState.canGoForward,
+            accessibilityLabel: "Page suivante",
+            children: <ChevronRight color={COLORS.textPrimary} size={20} />,
+          })}
+          {renderToolbarButton({
+            onPress: () =>
+              navState.loading ? webRef.current?.stopLoading() : webRef.current?.reload(),
+            disabled: suspended,
+            accessibilityLabel: navState.loading ? "Arrêter le chargement" : "Actualiser",
+            children: (
+              <View style={styles.refreshWrap}>
+                {navState.loading ? (
+                  <ActivityIndicator size="small" color={COLORS.textPrimary} />
+                ) : (
+                  <RefreshCw color={COLORS.textPrimary} size={19} />
+                )}
+              </View>
+            ),
+          })}
+          <View style={styles.toolbarSpacer} />
+          <Pressable
+            disabled={suspended}
+            onPress={() => navigate(GOOGLE_HOME_URL)}
+            hitSlop={6}
+            accessibilityLabel="Page de départ du navigateur (Google)"
+            style={({ pressed }) => [
+              styles.toolButton,
+              styles.browserHome,
+              { opacity: suspended ? 0.35 : pressed ? 0.7 : 1 }
+            ]}
+          >
+            <Globe color={COLORS.actionFg} size={16} />
+            <Text style={styles.browserHomeText}>Google</Text>
+          </Pressable>
+        </View>
+
+        {notice ? (
+          <View style={styles.noticeRow}>
+            <AlertTriangle color={COLORS.warning} size={13} />
+            <Text style={styles.noticeText}>{notice}</Text>
           </View>
-        )}
+        ) : null}
+
+        {/* La WebView occupe TOUT l'espace restant de la zone supérieure,
+            sans grandes marges inutile. */}
+        <View style={styles.webArea}>
+          {suspended && !preserve ? (
+            <BrowseSuspensionScreen
+              reason={suspendReason ?? "no_session"}
+              onGoHome={() => router.push("/(app)/(tabs)/dashboard")}
+            />
+          ) : (
+            <View style={styles.webFrame}>
+              <WebView
+                key={`web-${resumeNonce}`}
+                ref={webRef}
+                source={{ uri: sourceUrl }}
+                style={styles.webview}
+                startInLoadingState
+                javaScriptEnabled
+                domStorageEnabled
+                thirdPartyCookiesEnabled
+                decelerationRate="normal"
+                allowsBackForwardNavigationGestures
+                setSupportMultipleWindows={false}
+                originWhitelist={["http://*", "https://*"]}
+                mixedContentMode="never"
+                allowsFullscreenVideo={false}
+                injectedJavaScript={NEW_WINDOW_HANDLER_JS}
+                onShouldStartLoadWithRequest={shouldStartLoad}
+                onLoadStart={handleLoadStart}
+                onNavigationStateChange={handleNavigationStateChange}
+                onError={handleWebError}
+                onHttpError={handleHttpError}
+              />
+              {suspended && preserve && (
+                <BrowseSuspensionOverlay
+                  reason={suspendReason ?? "verifying"}
+                  onRetry={() => {
+                    // Re-validation immédiate : la page reste gelée tant que
+                    // l'accès n'est pas re-confirmé (aucune navigation possible).
+                    void renewNow();
+                  }}
+                />
+              )}
+            </View>
+          )}
+
+          {!suspended && loadError && (
+            <View style={styles.errorOverlay}>
+              <View style={styles.errorIcon}>
+                <AlertTriangle color={COLORS.warning} size={26} />
+              </View>
+              <Text style={styles.errorTitle}>{loadError.title}</Text>
+              <Text style={styles.errorDetail}>{loadError.detail}</Text>
+              <View style={styles.errorActions}>
+                <Pressable
+                  onPress={() => {
+                    setLoadError(null);
+                    webRef.current?.reload();
+                  }}
+                  style={({ pressed }) => [styles.errorRetry, { opacity: pressed ? 0.8 : 1 }]}
+                >
+                  <RefreshCw color={COLORS.actionFg} size={15} />
+                  <Text style={styles.errorRetryText}>Réessayer</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => navigate(GOOGLE_HOME_URL)}
+                  style={({ pressed }) => [styles.errorHome, { opacity: pressed ? 0.8 : 1 }]}
+                >
+                  <Globe color={COLORS.textPrimary} size={15} />
+                  <Text style={styles.errorHomeText}>Page de départ</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
       </View>
 
-      {/* Bande publicitaire persistante : frère de la WebView (jamais un
-          overlay), hors du contenu web et de tout défilement. Elle occupe
-          une place réservée en bas de l'écran, au-dessus des onglets, et
-          affiche la vraie création (même source de campagne, même session). */}
-      <View style={styles.adStripWrap}>
-        <BrowseAdBanner variant="strip" />
+      {/* ── Zone publicitaire : tiers inférieur ─────────────────────────
+          Place RÉSERVÉE (jamais un overlay) : fixe pendant le défilement
+          de la page, elle ne peut ni recouvrir la WebView ni être écrasée
+          par la navigation. Les boutons flottants Accueil / Naviguer sont
+          superposés dans sa partie basse, au-dessus de la marge interne
+          réservée au contenu publicitaire. */}
+      <View style={[styles.adZone, { height: adZoneHeight }]}>
+        <BrowseAdBanner variant="strip" contentBottomInset={adContentInset} />
       </View>
     </View>
   );
@@ -496,49 +543,42 @@ export default function BrowseScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
+  browserZone: { flexShrink: 0, overflow: "hidden" },
+  headerRow: { paddingHorizontal: 16 },
   addressRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: 20,
+    marginTop: 8,
+    paddingHorizontal: 16
   },
-  googleTile: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    height: 46,
-    paddingHorizontal: 12,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.actionBg,
-  },
-  googleTileText: { color: COLORS.actionFg, fontSize: 12, fontFamily: "Inter-Bold" },
   inputWrap: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    height: 46,
+    height: 42,
     borderRadius: RADIUS.md,
     paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.10)"
   },
   input: { flex: 1, color: COLORS.textPrimary, fontSize: 14, fontFamily: "Inter-Regular" },
   goButton: {
-    width: 46,
-    height: 46,
+    width: 42,
+    height: 42,
     borderRadius: RADIUS.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: COLORS.actionBg,
+    backgroundColor: COLORS.actionBg
   },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginTop: 10,
-    paddingHorizontal: 20,
+    marginTop: 8,
+    paddingHorizontal: 16
   },
   toolbarSpacer: { flex: 1 },
   toolButton: {
@@ -549,43 +589,55 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.10)",
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.border
   },
+  // Retour à la page de DÉPART du navigateur : pastille étiquetée « Google »
+  // (et non l'onglet « Accueil » de Bôjô, bouton flottant Home).
+  browserHome: {
+    width: "auto",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.actionBg
+  },
+  browserHomeText: { color: COLORS.actionFg, fontSize: 12.5, fontFamily: "Inter-Bold" },
   refreshWrap: { alignItems: "center", justifyContent: "center", width: 20, height: 20 },
   noticeRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginTop: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: RADIUS.sm,
     borderWidth: 1,
     borderColor: "rgba(245, 158, 11, 0.35)",
-    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    backgroundColor: "rgba(245, 158, 11, 0.1)"
   },
   noticeText: { flex: 1, color: COLORS.warning, fontSize: 11.5, fontFamily: "Inter-Regular" },
-  webArea: { flex: 1, flexShrink: 1, marginTop: 10, marginHorizontal: 20, marginBottom: 0 },
-  // Zone publicitaire réservée : jamais compressée sous sa hauteur lisible
-  // (flexShrink 0) — c'est la WebView au-dessus qui se réduit si besoin.
-  adStripWrap: { flexShrink: 0, marginTop: 12 },
+  // La WebView prend TOUT l'espace restant de la zone navigateur.
+  webArea: { flex: 1, marginTop: 8 },
   webFrame: {
     flex: 1,
-    borderRadius: RADIUS.lg,
+    borderTopLeftRadius: RADIUS.lg,
+    borderTopRightRadius: RADIUS.lg,
     overflow: "hidden",
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.white,
+    borderBottomWidth: 0,
+    backgroundColor: COLORS.white
   },
   webview: { flex: 1, backgroundColor: COLORS.white },
+  // Zone publicitaire réservée : jamais compressée sous sa hauteur lisible
+  // (flexShrink 0) — c'est la WebView au-dessus qui se réduit si besoin.
+  adZone: { flexShrink: 0, overflow: "hidden" },
   errorOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
-    backgroundColor: "rgba(255,255,255,0.97)",
-    borderRadius: RADIUS.lg,
+    backgroundColor: "rgba(255,255,255,0.97)"
   },
   errorIcon: {
     width: 56,
@@ -596,7 +648,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: "rgba(245, 158, 11, 0.16)",
     borderWidth: 1,
-    borderColor: "rgba(245, 158, 11, 0.4)",
+    borderColor: "rgba(245, 158, 11, 0.4)"
   },
   errorTitle: { color: "#111827", fontSize: 16, fontFamily: "Inter-Bold", textAlign: "center" },
   errorDetail: {
@@ -606,7 +658,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 6,
     marginBottom: 16,
-    fontFamily: "Inter-Regular",
+    fontFamily: "Inter-Regular"
   },
   errorActions: { flexDirection: "row", gap: 10 },
   errorRetry: {
@@ -616,7 +668,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 11,
     borderRadius: RADIUS.md,
-    backgroundColor: COLORS.actionBg,
+    backgroundColor: COLORS.actionBg
   },
   errorRetryText: { color: COLORS.actionFg, fontSize: 13, fontFamily: "Inter-Bold" },
   errorHome: {
@@ -628,7 +680,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md,
     backgroundColor: "rgba(89, 18, 237, 0.12)",
     borderWidth: 1,
-    borderColor: "rgba(89, 18, 237, 0.35)",
+    borderColor: "rgba(89, 18, 237, 0.35)"
   },
-  errorHomeText: { color: COLORS.actionFg, fontSize: 13, fontFamily: "Inter-Bold" },
+  errorHomeText: { color: COLORS.actionFg, fontSize: 13, fontFamily: "Inter-Bold" }
 });

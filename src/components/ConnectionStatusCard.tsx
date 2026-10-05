@@ -29,12 +29,22 @@ interface ConnectionStatusCardProps {
   totalQuotaMB?: number;
   networkHealth?: string;
   providerKind?: NetworkProviderKind;
+  /**
+   * true quand le fournisseur « live » n'est PAS confirmé comme matériel
+   * réel : agent de TEST (`MIKROTIK_MOCK`) ou information absente, faute de
+   * `MIKROTIK_REAL=1`. L'adaptateur est bien « live », mais le routeur peut
+   * être simulé : on l'annonce comme tel et on masque les compteurs. Ne
+   * jamais afficher « accès réel » ni des Mo sur un mock, et se rappeler que
+   * le défaut est la prudence (fail closed).
+   */
+  agentSimulated?: boolean;
   lastSyncAt?: string | null;
   /**
    * true uniquement si le compteur provient réellement du routeur (MikroTik,
-   * providerKind "live"). En mode provisoire (simulé / non configuré), les
-   * métriques de quota sont masquées au profit d'une note honnête : le
-   * téléphone ne mesure pas la données traversant le point d'accès.
+   * providerKind "live" ET agent non simulé). En mode provisoire (simulé /
+   * non configuré), les métriques de quota sont masquées au profit d'une
+   * note honnête : le téléphone ne mesure pas la données traversant le
+   * point d'accès.
    */
   meterTrusted?: boolean;
 }
@@ -55,11 +65,23 @@ export default function ConnectionStatusCard({
   totalQuotaMB = 0,
   networkHealth,
   providerKind,
+  agentSimulated = false,
   lastSyncAt,
-  meterTrusted = false
+  meterTrusted
 }: ConnectionStatusCardProps) {
   const statusColor = connected ? COLORS.success : connecting ? COLORS.warning : COLORS.textMuted;
   const statusLabel = connected ? "Wi-Fi gratuit actif" : connecting ? "Autorisation en cours" : "Accès coupé";
+
+  // Un compteur n'est « de confiance » que si le routeur est réel ET piloté
+  // par un agent de production. `meterTrusted` reste prioritaire quand le
+  // parent le fournit ; sinon on le déduit honnêtement des deux drapeaux.
+  const countersTrusted = meterTrusted ?? (providerKind === "live" && !agentSimulated);
+  const mockLive = providerKind === "live" && agentSimulated;
+  const providerLabel = mockLive
+    ? "Routeur simulé (agent de test)"
+    : providerKind
+      ? PROVIDER_LABEL[providerKind]
+      : null;
 
   const healthLabel = networkHealth
     ? {
@@ -86,7 +108,7 @@ export default function ConnectionStatusCard({
         </View>
       </View>
 
-      {meterTrusted ? (
+      {countersTrusted ? (
         <>
           <View style={styles.percentRow}>
             <Text style={styles.percent}>{Math.round(percent)}%</Text>
@@ -128,9 +150,13 @@ export default function ConnectionStatusCard({
           <View style={styles.honestRow}>
             <HardDrive color={COLORS.primaryLight} size={14} />
             <Text style={styles.honestText}>
-              Bôjô offre un quota de 5 Go. Le comptage sera mesuré par le routeur
-              (MikroTik) lors de la phase définitive — les compteurs ne sont pas
-              encore actifs en mode provisoire.
+              {mockLive
+                ? "Bôjô offre un quota de 5 Go. L'agent connecté au serveur est un " +
+                  "agent de TEST : aucun routeur réel ne pilote votre accès, les " +
+                  "compteurs ne sont donc pas affichés."
+                : "Bôjô offre un quota de 5 Go. Le comptage sera mesuré par le routeur " +
+                  "(MikroTik) lors de la phase définitive — les compteurs ne sont pas " +
+                  "encore actifs en mode provisoire."}
             </Text>
           </View>
         </View>
@@ -138,9 +164,7 @@ export default function ConnectionStatusCard({
 
       {(networkHealth || lastSyncAt) && (
         <View style={styles.footer}>
-          {providerKind && PROVIDER_LABEL[providerKind] && (
-            <Text style={styles.providerLabel}>{PROVIDER_LABEL[providerKind]}</Text>
-          )}
+          {providerLabel && <Text style={styles.providerLabel}>{providerLabel}</Text>}
           {networkHealth && (
             <View style={styles.footerRow}>
               <View style={[styles.miniDot, { backgroundColor: healthColor }]} />

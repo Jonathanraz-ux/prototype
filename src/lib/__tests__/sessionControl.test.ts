@@ -16,7 +16,12 @@ import {
   resumeFailureAction,
   type ServerSessionView,
 } from "../sessionControl";
-import { TAB_BAR_CLEARANCE, TAB_BAR_HEIGHT, TAB_BAR_BOTTOM_OFFSET } from "../tabBarMetrics";
+import {
+  FLOATING_NAV_CLEARANCE,
+  FLOATING_NAV_BUTTON_HEIGHT,
+  FLOATING_NAV_MARGIN,
+  floatingNavClearance
+} from "../floatingNav";
 
 // ————————————————————————————————————————————————————————————
 // Portée de ces tests : logique SIMULÉE (aucune Edge Function, aucun
@@ -339,14 +344,19 @@ describe("resumeFailureAction — une panne transitoire ne volatilise pas la pau
 });
 
 // ————————————————————————————————————————————————————————————
-// RÉGRESSION LAYOUT (BUG 1) — la géométrie de la barre d'onglets
-// est une source unique : tout écran d'onglet réserve une marge ≥
-// la hauteur réelle occupée par la barre (le bouton « Reprendre la
-// session » ne peut plus être recouvert).
+// REGRESSION LAYOUT (BUG 1) — la géométrie de la navigation flottante
+// est une source unique : tout écran défilant réserve une marge ≥
+// la hauteur réellement occupée par les boutons flottants (le bouton
+// « Se déconnecter » ne peut plus être recouvert).
 // ————————————————————————————————————————————————————————————
-describe("barre d'onglets — constante partagée (layout)", () => {
-  it("la marge de dégagement dépasse la zone occultée (barre + décalage)", () => {
-    expect(TAB_BAR_CLEARANCE).toBeGreaterThan(0);
-    expect(TAB_BAR_CLEARANCE).toBe(TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_OFFSET);
+describe("navigation flottante — constante partagée (layout)", () => {
+  it("la marge de dégagement couvre la zone occultée (bouton + marge basse)", () => {
+    expect(FLOATING_NAV_CLEARANCE).toBeGreaterThan(0);
+    expect(FLOATING_NAV_CLEARANCE).toBe(FLOATING_NAV_BUTTON_HEIGHT + FLOATING_NAV_MARGIN * 2);
+  });
+
+  it("la marge réservée par un écran défilant inclut l'inset système bas", () => {
+    expect(floatingNavClearance(0)).toBe(FLOATING_NAV_MARGIN + FLOATING_NAV_BUTTON_HEIGHT);
+    expect(floatingNavClearance(48)).toBe(48 + FLOATING_NAV_MARGIN + FLOATING_NAV_BUTTON_HEIGHT);
   });
 });
