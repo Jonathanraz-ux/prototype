@@ -299,6 +299,14 @@ pour que le serveur n'ait plus à êtrecru sur parole. Exige une migration
 > configuration et le câblage réels seront poursuivis à ce moment-là.**
 > Séquence de branchement, preuves attendues et points à mesurer :
 > `docs/MIKROTIK_MISE_EN_SERVICE.md` **§10**.
+>
+> 📌 **APK du test prêt** — Bôjô `1.2.0` (versionCode **8**), profil
+> `terrain`, build EAS `9094eb94-e979-4fad-8cf6-b6f54dfb6b97` (05/10,
+> `finished`), commit `425df87`. Distribution `internal`, installation
+> manuelle. **Lien de l'APK et détail des correctifs embarqués :
+> `MIKROTIK_MISE_EN_SERVICE.md` §10.0.**
+> Seul verrou restant avant la recette : `MIKROTIK_PASSWORD`, encore à
+> `changez-moi` dans `agent/.env` (§10.0.2).
 
 1. **J1 test MikroTik** : configurer le routeur (SSID isolé, IPv6 coupé),
    poser les secrets serveur, enrôler l'agent, lancer `e2e-mikrotik-chain.mjs`

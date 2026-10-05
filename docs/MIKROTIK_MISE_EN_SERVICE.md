@@ -7,12 +7,17 @@
 > **Aucune étape de ce runbook n'a été validée sur du matériel.** Tout a été
 > vérifié contre un routeur simulé (`MockRouter`) et un serveur RouterOS
 > simulé sur TCP. Les points qui demandent le routeur physique sont
-> explicitement marqués `[MATÉRIEL]`.
+> explicitement marqués `[MATÉRIEL]`. L'APK du test est produit et
+> installable (§10.0) : c'est le premier build `terrain` complet, mais son
+> comportement face à un vrai hAP ac² reste **non validé**.
 >
-> 📌 **Le hAP ac² sera branché à la prochaine séance : la configuration et le
-> câblage réels seront poursuivis à ce moment-là.** Tout ce qui était
-> préparable sans matériel est terminé et vert. Pour reprendre le fil sans
-> relire le runbook en entier, aller directement au **§10**.
+> 📌 **APK du test prêt : Bôjô 1.2.0 (versionCode 8), build EAS
+> `9094eb94` du 05/10 — lien et détails en §10.0.** Le hAP ac² sera branché
+> à la prochaine séance : la configuration et le câblage réels seront
+> poursuivis à ce moment-là. Tout ce qui était préparable sans matériel est
+> terminé et vert ; **le seul verrou restant est `MIKROTIK_PASSWORD`
+> (§10.0.2)**. Pour reprendre le fil sans relire le runbook en entier,
+> aller directement au **§10**.
 
 ---
 
@@ -410,9 +415,90 @@ Décision actée avec l'opérateur : **le hAP ac² sera branché à la prochaine
 séance, et la configuration comme le câblage réels seront poursuivis à ce
 moment-là.**
 
-Tout ce qui était préparable sans matériel est terminé et vert : agent 88/88,
-serveur 330/330 (28 suites), `tsc` 0 erreur, build EAS `terrain` réussi. Ce
-qui reste ne se décide pas sans le routeur sous les yeux.
+Tout ce qui était préparable sans matériel est terminé et vert : agent 103
+tests, serveur 339 tests (30 suites), `tsc` 0 erreur, build EAS `terrain`
+réussi. Ce qui reste ne se décide pas sans le routeur sous les yeux.
+
+### 10.0 APK du test — Bôjô 1.2.0 (versionCode 8)
+
+**C'est l'APK final du grand test MikroTik. Aucun autre build avant le
+résultat du test.**
+
+| Champ | Valeur |
+| --- | --- |
+| Build EAS | `9094eb94-e979-4fad-8cf6-b6f54dfb6b97` |
+| Profil / canal | `terrain` / `terrain` |
+| Version | `1.2.0` (versionCode **8**) |
+| Commit | `425df87` (« resout l'adresse du client sur le routeur ») |
+| Started by | `jonathan-raz` |
+| Période | 05/10/2026 13:12 → 13:38 (26 min, statut `finished`) |
+| Distribution | `internal` → **installation manuelle** sur l'appareil |
+
+**Lien direct de l'APK :**
+
+```
+https://expo.dev/artifacts/eas/dKpgsRMJ6vOR3PB6t-ZTgnYtKV_d4Fg-qiBcb5AiRu0.apk
+```
+
+Journal du build :
+`https://expo.dev/accounts/jonathan-raz/projects/wifi-zone/builds/9094eb94-e979-4fad-8cf6-b6f54dfb6b97`
+
+> Ce build est compilé avec `EXPO_PUBLIC_NETWORK_MODE=mikrotik` : l'app
+> ne lèvera pas le mode démo. Aucun `npm run check` n'est requis avant la
+> recette, le commit est déjà vert sur les 442 tests.
+
+> L'APK **ne contient aucun secret routeur** : ni hôte, ni identifiant,
+> ni mot de passe. Il ignore tout du hAP et passe par l'agent local.
+> Perdre ou exposer cet APK ne donne aucun accès au routeur.
+
+### 10.0.1 Ce que ce build corrige (et qui n'avait jamais été testé sur matériel)
+
+| Symptôme d'avant | Correctif embarqué |
+| --- | --- |
+| Autorisation refusée en boucle : `deviceObservedIp` valait `undefined` | l'agent lit l'adresse **sur les baux DHCP du routeur**, au lieu de croire le téléphone (l'app ne connaît pas sa propre adresse de gestion) |
+| Un agent simulé s'annonçait « Accès réseau réel (MikroTik) » avec des compteurs à 0 | `providerKind` vient de la config locale ; `networkDetailVerified=false` tant que le serveur n'a pas répondu → **aucun faux vert** |
+| Attribution d'adresse hasardeuse avec 2 clients ou plus | résolution **fail closed** : IP déclarée, sinon MAC, sinon l'unique client actif ; au-delà on **refuse** d'ouvrir le Wi-Fi du mauvais |
+
+### 10.0.2 Le seul verrou restant : le mot de passe du routeur
+
+`agent/.env` est complet **sauf `MIKROTIK_PASSWORD`**, encore à
+`changez-moi`. Le contrôle pré-vol le signale et s'arrête là :
+
+```
+[ERR]   x MIKROTIK_PASSWORD encore a « changez-moi »
+[ERR] Configuration incomplete.
+```
+
+Tout le reste est prêt à l'emploi :
+
+| Variable | État |
+| --- | --- |
+| `SUPABASE_URL` | renseigné |
+| `AGENT_TOKEN` | renseigné (64 caractères) |
+| `NETWORK_HMAC_SECRET` | renseigné (64 caractères) |
+| `NETWORK_ADAPTER_TYPE` | `mikrotik` |
+| `AGENT_ROUTER_PROTOCOL` | `api` (seul choix qui marche sur 6.x **et** 7.x) |
+| `MIKROTIK_HOST` | renseigné |
+| `MIKROTIK_USERNAME` / `PASSWORD` | / **`changez-moi`** |
+| `MIKROTIK_TLS` | `false` |
+| `MIKROTIK_PORT_API` | renseigné (8728) |
+
+> ⚠ **`MIKROTIK_PORT_REST` est volontairement vide** : ce n'est pas une
+> oubli, l'agent le déduit du TLS. Il ne sert qu'en mode `rest`.
+
+**Séquence de démarrage du jour J**, dès le mot de passe renseigné :
+
+```powershell
+.\agent\start.ps1 -Doctor      # les 7 lignes en [OK ]
+.\agent\start.ps1 -Provision   # pose des règles wz (désarmées) + vérif + rollback
+.\agent\start.ps1              # laisser tourner en continu
+```
+
+> `register.mjs` ne se relance que si `token refusé (401)` apparaît :
+> c'est l'erreur qui dit que l'agent n'est pas (ou plus) enregistré.
+
+Puis le parcours du §10.2, en commençant par la mesure de l'`ip-agent` à
+injecter dans `bojo-setup.rsc`.
 
 Les deux correctifs de cette séance — authentification par défi MD5 (§14.1)
 et décodage des réponses multi-enregistrements (§14) — sont **prouvés par
